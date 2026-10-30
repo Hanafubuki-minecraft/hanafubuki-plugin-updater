@@ -18,6 +18,10 @@ jobs:
         with:
           fetch-depth: 0
 
+      - name: Get version
+        id: get_version
+        run: echo "version=1.0.10" >> $GITHUB_OUTPUT
+
       - name: Build
         run: ./gradlew build --no-daemon
 
@@ -31,7 +35,3 @@ jobs:
           files: build/libs/hanafubuki-plugin-updater-${{ steps.get_version.outputs.version }}.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-      - name: Get version
-        id: get_version
-        run: echo "version=1.0.10" >> $GITHUB_OUTPUT
