@@ -19,7 +19,7 @@ repositories {
 }
 
 dependencies {
-    compileOnly("io.papermc.paper:paper-api:1.21.9-R0.1-SNAPSHOT")
+    compileOnly("io.papermc.paper:paper-api:26.3.build.226-stable")
     
     // Gson for JSON parsing
     implementation("com.google.code.gson:gson:2.10.1")
