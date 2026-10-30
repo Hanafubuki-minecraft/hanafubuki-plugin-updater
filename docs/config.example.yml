@@ -1,0 +1,165 @@
+# Hanafubuki Plugin Updater - Example Configuration
+# Copy this file to config.yml and customize for your server
+
+# ============================================
+# GLOBAL SETTINGS
+# ============================================
+global:
+  # Minimum version that plugins must meet to be updated
+  # Plugins below this version will be skipped
+  min_version: "1.0.0"
+  
+  # Maximum version that plugins can be updated to
+  # Use "latest" or high version like "99.99.99" for no limit
+  max_version: "99.99.99"
+
+# ============================================
+# UPDATE MODES
+# ============================================
+modes:
+  # Include-only mode:
+  # - true  = Only update plugins explicitly listed in include_list
+  # - false = Update all configured plugins except those in exclude_list
+  include_only: false
+  
+  # List of plugins to exclude from updates
+  # Works in BOTH modes (include_only true or false)
+  exclude_list: []
+    # - "plugin-to-skip"
+    # - "another-plugin"
+  
+  # List of plugins to include (only used when include_only: true)
+  include_list: []
+    # - "plugin-to-update"
+    # - "another-plugin"
+
+# ============================================
+# MODRINTH SETTINGS
+# ============================================
+modrinth:
+  # Custom User-Agent (optional, defaults to plugin name/version)
+  # user_agent: "MyServer/Updater/1.0"
+  
+  # Request timeout in seconds (default: 10)
+  # timeout: 10
+  
+  # Default loader filter (default: ["paper"])
+  # loaders: ["paper", "spigot"]
+  
+  # Default game version filter (default: ["1.21.9"])
+  # game_versions: ["1.21.9", "1.21.8"]
+
+# ============================================
+# GITHUB SETTINGS
+# ============================================
+github:
+  # Custom User-Agent (optional, defaults to plugin name/version)
+  # user_agent: "MyServer/Updater/1.0"
+  
+  # Request timeout in seconds (default: 10)
+  # timeout: 10
+  
+  # GitHub token for authenticated requests (optional, increases rate limit)
+  # Get token at: https://github.com/settings/tokens
+  # token: "ghp_xxxxxxxxxxxx"
+  
+  # Default branch to check if no releases exist (default: "main")
+  # default_branch: "main"
+
+# ============================================
+# CONSOLE OUTPUT SETTINGS
+# ============================================
+console:
+  # Enable MiniMessage formatting (default: true)
+  # Requires Paper/Adventure API
+  mini_message: true
+  
+  # Color configuration for different message types
+  # Use MiniMessage format: https://docs.advntr.dev/minimessage/format.html
+  colors:
+    info: "<green>"
+    warning: "<yellow><bold>"
+    error: "<red><italic>"
+    success: "<aqua><bold>"
+    header: "<gradient:gold:yellow>"
+
+# ============================================
+# PLUGIN LIST - Plugins to update
+# ============================================
+plugins:
+  # ============================================
+  # MODRINTH PLUGINS
+  # ============================================
+  # For Modrinth plugins, only 'source' and 'version' are required.
+  # The plugin will auto-detect the project ID by searching the name.
+  # You can optionally specify 'project_id' to avoid search.
+  
+  # Example: WorldEdit (Modrinth)
+  "WorldEdit":
+    source: "modrinth"
+    version: "7.3.12"
+    # project_id: "A1B2C3D4"  # Optional: explicit Modrinth project ID
+    # min_version: "7.0.0"    # Optional: override global min
+    # max_version: "7.9.9"    # Optional: override global max
+  
+  # Example: LuckPerms (Modrinth)
+  "LuckPerms":
+    source: "modrinth"
+    version: "5.4.120"
+    # project_id: "luckperms"
+  
+  # Example: ViaVersion (Modrinth)
+  "ViaVersion":
+    source: "modrinth"
+    version: "5.3.0"
+    # project_id: "viaversion"
+  
+  # Example: Geyser (Modrinth)
+  "Geyser-Spigot":
+    source: "modrinth"
+    version: "2.4.0"
+    # project_id: "geyser"
+
+  # ============================================
+  # GITHUB PLUGINS
+  # ============================================
+  # For GitHub plugins, 'source', 'version', AND 'repo' are required.
+  # 'repo' must be in 'owner/repo' format.
+  # The plugin will check releases, falling back to main branch commit.
+  
+  # Example: Paper (GitHub)
+  "Paper":
+    source: "github"
+    version: "1.21.9-R0.1"
+    repo: "PaperMC/Paper"
+    # asset_pattern: "paper-*.jar"  # Optional: specific asset pattern
+    # min_version: "1.21.0"         # Optional: override global min
+    # max_version: "1.21.9"         # Optional: override global max
+  
+  # Example: Floodgate (GitHub)
+  "Floodgate":
+    source: "github"
+    version: "2.4.0"
+    repo: "GeyserMC/Floodgate"
+    # asset_pattern: "floodgate-spigot.jar"
+  
+  # Example: ProtocolLib (GitHub)
+  "ProtocolLib":
+    source: "github"
+    version: "5.2.0"
+    repo: "dmulloy2/ProtocolLib"
+    # asset_pattern: "ProtocolLib.jar"
+
+  # ============================================
+  # ADD YOUR PLUGINS BELOW
+  # ============================================
+  # "YourPluginName":
+  #   source: "modrinth"
+  #   version: "1.0.0"
+  #   # project_id: "optional-project-id"
+  
+  # "AnotherPlugin":
+  #   source: "github"
+  #   version: "2.0.0"
+  #   repo: "Owner/Repo"
+  #   # asset_pattern: "plugin-*.jar"
