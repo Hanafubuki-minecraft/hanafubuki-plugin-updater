@@ -22,16 +22,6 @@ jobs:
         run: ./gradlew build --no-daemon
 
       - name: Create Release
-        run: |
-          VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
-          TAG="v$VERSION"
-          JAR="build/libs/hanafubuki-plugin-updater-$VERSION.jar"
-          
-          if gh release view "$TAG" >/dev/null 2>&1; then
-            echo "Release $TAG already exists"
-            exit 0
-          fi
-          
-          gh release create "$TAG" "$JAR" --title "Release $TAG" --notes "Release $TAG"
+        run: VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ') && TAG="v$VERSION" && JAR="build/libs/hanafubuki-plugin-updater-$VERSION.jar" && if gh release view "$TAG" >/dev/null 2>&1; then echo "Release $TAG already exists"; exit 0; fi && gh release create "$TAG" "$JAR" --title "Release $TAG" --notes "Release $TAG"
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
