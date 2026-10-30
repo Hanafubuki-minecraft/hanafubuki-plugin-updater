@@ -1,0 +1,27 @@
+# Compiled classes
+*.class
+
+# Log files
+*.log
+
+# Plugin build cache
+.cache/
+.mvn/
+
+# IDE specific settings
+.idea/
+.vscode/
+*.iml
+
+# OS generated files
+.DS_Store
+Thumbs.db
+*.swp
+*.swo
+
+# Generated folders
+target/
+build/
+
+# Local config overrides
+config.yml.local

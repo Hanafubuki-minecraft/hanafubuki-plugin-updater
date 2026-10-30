@@ -1,0 +1,15 @@
+name: HanafubukiPluginUpdater
+main: com.hanafubuki.updater.PluginUpdater
+version: ${version}
+api-version: 1.21
+author: Hanafubuki Team
+description: Automatically updates plugins from Modrinth and GitHub sources
+commands:
+  updateplugins:
+    description: Update plugins from Modrinth and GitHub
+    usage: /updateplugins
+    permission: hanafubuki.updater.update
+permissions:
+  hanafubuki.updater.update:
+    description: Allows users to run the plugin update command
+    default: op
