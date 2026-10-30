@@ -21,13 +21,17 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon
 
+      - name: Get version
+        id: get_version
+        run: echo "version=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')" >> $GITHUB_OUTPUT
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
-          tag_name: v$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
-          name: Release v$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Release v${{ steps.get_version.outputs.version }}
           draft: false
           prerelease: false
-          files: build/libs/hanafubuki-plugin-updater-$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ').jar
+          files: build/libs/hanafubuki-plugin-updater-${{ steps.get_version.outputs.version }}.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
