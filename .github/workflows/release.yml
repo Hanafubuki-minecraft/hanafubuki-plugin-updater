@@ -22,4 +22,4 @@ jobs:
           echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Print version
-        run: echo "Version: ${{ steps.version.outputs.version }}"
+        run: echo "Version: test"
