@@ -17,8 +17,7 @@ jobs:
       - name: Read version
         run: |
           VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
-          echo "VERSION=$VERSION" >> $GITHUB_ENV
-          echo "TAG=v$VERSION" >> $GITHUB_ENV
+          echo "Version: $VERSION"
 
       - name: Print version
-        run: echo "Version: $VERSION"
+        run: echo "world"
