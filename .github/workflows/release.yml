@@ -6,6 +6,10 @@ on:
     paths:
       - gradle.properties
 
+permissions:
+  contents: write
+  releases: write
+
 jobs:
   test:
     name: Test
