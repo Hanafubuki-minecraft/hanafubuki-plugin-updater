@@ -3,8 +3,6 @@ name: Release
 on:
   push:
     branches: [master]
-    paths:
-      - gradle.properties
 
 permissions:
   contents: write
