@@ -20,6 +20,15 @@ repositories {
 
 dependencies {
     compileOnly("io.papermc.paper:paper-api:1.21.9-R0.1-SNAPSHOT")
+    
+    // Gson for JSON parsing
+    implementation("com.google.code.gson:gson:2.15.0")
+    
+    // SnakeYAML for config parsing
+    implementation("org.yaml:snakeyaml:2.7")
+    
+    // JUnit for testing
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
 }
 
 java {
