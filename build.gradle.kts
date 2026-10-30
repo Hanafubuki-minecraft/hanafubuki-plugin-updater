@@ -25,7 +25,7 @@ dependencies {
     implementation("com.google.code.gson:gson:2.10.1")
     
     // SnakeYAML for config parsing
-    implementation("org.yaml:snakeyaml:2.0")
+    implementation("org.yaml:snakeyaml:2.7")
     
     // JUnit for testing
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.2")
