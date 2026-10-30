@@ -4,6 +4,10 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: write
+  releases: write
+
 jobs:
   release:
     name: Create Release
@@ -14,8 +18,8 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Read version
-        run: echo "hello"
+      - name: Build
+        run: ./gradlew build --no-daemon
 
       - name: Print version
         run: echo "world"
