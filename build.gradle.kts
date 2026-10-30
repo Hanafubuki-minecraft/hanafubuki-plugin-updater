@@ -28,10 +28,10 @@ dependencies {
     implementation("org.yaml:snakeyaml:2.0")
     
     // JUnit for testing
-    testImplementation("org.junit.jupiter:junit-jupiter:5.9.2")
+    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
     
     // Test runtime for JUnit
-    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.9.2")
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:6.1.3")
 }
 
 java {
