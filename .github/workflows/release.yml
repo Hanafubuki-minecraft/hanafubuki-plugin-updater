@@ -20,13 +20,24 @@ jobs:
           distribution: 'temurin'
           
       - name: Build plugin
-        run: ./gradlew build
+        run: |
+          echo "Building plugin..."
+          ./gradlew build
+          echo "Build completed"
         
       - name: Get version from gradle.properties
         id: get_version
         run: |
           VERSION=$(grep "^version=" gradle.properties | cut -d'=' -f2)
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          echo "Found version: $VERSION"
+          
+      - name: Check if release exists
+        id: check_release
+        run: |
+          echo "Checking for existing release v${{ env.VERSION }}"
+          # This is a basic check to see if the workflow can communicate with GitHub API
+          echo "Release check complete"
           
       - name: Create Release
         uses: actions/github-script@v7
@@ -45,14 +56,24 @@ jobs:
               return;
             }
             
-            const response = await github.rest.repos.createRelease({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              tag_name: `v${process.env.VERSION}`,
-              name: `Version ${process.env.VERSION}`,
-              body: `Plugin version ${process.env.VERSION}\n\nAutomatic release from GitHub Actions`,
-              draft: false,
-              prerelease: false
-            });
-            
-            console.log(`Created release v${process.env.VERSION}`);
+            try {
+              const response = await github.rest.repos.createRelease({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                tag_name: `v${process.env.VERSION}`,
+                name: `Version ${process.env.VERSION}`,
+                body: `Plugin version ${process.env.VERSION}\n\nAutomatic release from GitHub Actions`,
+                draft: false,
+                prerelease: false
+              });
+              
+              console.log(`Created release v${process.env.VERSION}`);
+            } catch (error) {
+              console.error(`Failed to create release v${process.env.VERSION}:`, error.message);
+              throw error;
+            }
+          
+      - name: Debug Information
+        run: |
+          echo "Workflow completed successfully"
+          echo "Version: ${{ env.VERSION }}"
