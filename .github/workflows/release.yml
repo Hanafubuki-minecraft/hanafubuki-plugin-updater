@@ -10,9 +10,6 @@ jobs:
   release:
     name: Create Release
     runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      releases: write
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
