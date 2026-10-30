@@ -1,1 +1,0 @@
-Hanafubuki Plugin Updater - Automatically updates Minecraft plugins from Modrinth and GitHub sources for Paper 1.21.9 servers.
