@@ -4,7 +4,7 @@ plugins {
 }
 
 group = "com.hanafubuki"
-version = "1.0.0"
+version = providers.gradleProperty("version").get()
 
 repositories {
     mavenCentral()
@@ -26,6 +26,10 @@ java {
     toolchain {
         languageVersion.set(JavaLanguageVersion.of(21))
     }
+}
+
+tasks.processResources {
+    expand(project.properties)
 }
 
 tasks.test {
