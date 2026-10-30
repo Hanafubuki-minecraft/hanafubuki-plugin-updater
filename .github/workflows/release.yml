@@ -16,7 +16,7 @@ jobs:
 
       - name: Read version
         id: version
-        run: echo "version=1.0.9" >> $GITHUB_OUTPUT
+        run: echo "hello"
 
       - name: Print version
         run: echo "Version: ${{ steps.version.outputs.version }}"
