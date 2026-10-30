@@ -21,10 +21,6 @@ jobs:
       - name: Build
         run: ./gradlew build --no-daemon
 
-      - name: Get version
-        id: get_version
-        run: echo "version=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')" >> $GITHUB_OUTPUT
-
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
@@ -35,3 +31,7 @@ jobs:
           files: build/libs/hanafubuki-plugin-updater-${{ steps.get_version.outputs.version }}.jar
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version
+        id: get_version
+        run: echo "version=1.0.10" >> $GITHUB_OUTPUT
