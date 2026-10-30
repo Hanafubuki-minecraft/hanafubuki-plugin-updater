@@ -4,6 +4,10 @@ on:
   push:
     branches: [master]
 
+permissions:
+  contents: write
+  releases: write
+
 jobs:
   release:
     name: Create Release
@@ -14,10 +18,22 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Read version
+      - name: Build
+        run: ./gradlew build --no-daemon
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: v${{ steps.get_version.outputs.version }}
+          name: Release v${{ steps.get_version.outputs.version }}
+          draft: false
+          prerelease: false
+          files: build/libs/hanafubuki-plugin-updater-${{ steps.get_version.outputs.version }}.jar
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Get version
+        id: get_version
         run: |
           VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
-          echo "Version: $VERSION"
-
-      - name: Print version
-        run: echo "world"
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
