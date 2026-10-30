@@ -80,3 +80,11 @@ GPLv3, same as other Hanafubuki plugins.
 ## Subagents
 Subagents are started with the `subagent` tool. It is not a skill.
 Give the subagent full context: it does not see this conversation.
+
+## Definition of done
+- After every code change run `./gradlew build`. A task is done only when it passes. Show the output.
+- Never write placeholder code or comments like "In a real implementation", "For now", "simulate". Implement it or ask.
+- Never say something is done without the command output proving it.
+- Read docs/ before any design decision. If behavior changes, update docs/ in the same task.
+- After a finished task: `git add -A && git commit -m "<what>" && git push origin master`.
+- One task per session. Do not touch files outside the task.

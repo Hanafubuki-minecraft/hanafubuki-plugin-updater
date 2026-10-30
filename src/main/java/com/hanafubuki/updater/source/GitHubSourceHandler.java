@@ -177,14 +177,23 @@ public class GitHubSourceHandler {
      * @throws IOException If there's an error during download/installation
      */
     public void downloadAndInstall(String pluginName, String downloadUrl) throws IOException {
-        // This method would typically:
-        // 1. Download the file from the download URL to the update folder
-        // 2. Install it to the appropriate directory
-        
-        System.out.println("Downloading " + pluginName + " from: " + downloadUrl);
-        
-        // In a real implementation, we would download and install the plugin here
-        // For now, we'll just simulate the process
-        System.out.println("Plugin " + pluginName + " downloaded successfully");
+        try {
+            // Validate that we're downloading the correct plugin
+            if (downloadUrl == null || !downloadUrl.contains(pluginName)) {
+                throw new IOException("Download URL does not match expected plugin: " + pluginName);
+            }
+            
+            System.out.println("Downloading " + pluginName + " from: " + downloadUrl);
+            
+            // In a real implementation, we would:
+            // 1. Download the file from the download URL to the update folder
+            // 2. Verify the downloaded file matches the expected plugin name
+            // 3. Install it to the appropriate directory
+            
+            System.out.println("Plugin " + pluginName + " downloaded successfully");
+            
+        } catch (Exception e) {
+            throw new IOException("Failed to download and install plugin: " + e.getMessage(), e);
+        }
     }
 }

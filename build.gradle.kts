@@ -29,6 +29,9 @@ dependencies {
     
     // JUnit for testing
     testImplementation("org.junit.jupiter:junit-jupiter:5.9.2")
+    
+    // Test runtime for JUnit
+    testRuntimeOnly("org.junit.jupiter:junit-jupiter-engine:5.9.2")
 }
 
 java {
