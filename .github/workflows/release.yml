@@ -15,7 +15,11 @@ jobs:
           fetch-depth: 0
 
       - name: Read version
-        run: echo "hello"
+        id: version
+        run: |
+          VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "tag=v$VERSION" >> $GITHUB_OUTPUT
 
       - name: Print version
-        run: echo "world"
+        run: echo "Version: ${{ steps.version.outputs.version }}"
