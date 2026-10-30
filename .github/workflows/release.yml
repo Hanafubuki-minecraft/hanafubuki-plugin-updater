@@ -15,7 +15,6 @@ jobs:
           fetch-depth: 0
 
       - name: Read version
-        id: version
         run: echo "version=1.0.0" >> $GITHUB_OUTPUT
 
       - name: Print version
