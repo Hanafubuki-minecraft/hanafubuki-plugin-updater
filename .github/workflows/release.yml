@@ -16,3 +16,6 @@ jobs:
 
       - name: Read version
         run: echo "hello"
+
+      - name: Print version
+        run: echo "world"
