@@ -15,7 +15,9 @@ jobs:
           fetch-depth: 0
 
       - name: Read version
-        run: echo "hello"
+        run: |
+          VERSION=$(grep '^version=' gradle.properties | cut -d'=' -f2 | tr -d ' ')
+          echo "Version: $VERSION"
 
       - name: Print version
         run: echo "world"
