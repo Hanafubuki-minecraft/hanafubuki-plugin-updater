@@ -6,6 +6,10 @@ on:
     paths:
       - gradle.properties
 
+permissions:
+  contents: write
+  releases: write
+
 jobs:
   release:
     name: Create Release
@@ -49,4 +53,4 @@ jobs:
           prerelease: false
           files: build/libs/hanafubuki-plugin-updater-${{ steps.version.outputs.version }}.jar
         env:
-          GITHUB_TOKEN: ${{ secrets.RELEASE_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
