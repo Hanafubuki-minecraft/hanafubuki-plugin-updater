@@ -12,10 +12,15 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.event.EventHandler;
+import org.bukkit.event.Listener;
+import org.bukkit.event.server.PluginDisableEvent;
+import org.bukkit.event.server.PluginEnableEvent;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -39,9 +44,15 @@ public class RepositoryManager {
     private final ExecutorService executorService;
     private final String updateFolderName;
     
+    // Cache for plugin name -> JAR path mapping
+    private final Map<String, Path> pluginJarCache = new ConcurrentHashMap<>();
+    
     public RepositoryManager(ExecutorService executorService) {
         this.executorService = executorService;
         this.plugin = com.hanafubuki.updater.PluginUpdater.getPlugin(com.hanafubuki.updater.PluginUpdater.class);
+        
+        // Register listener to invalidate cache on plugin enable/disable
+        Bukkit.getPluginManager().registerEvents(new PluginCacheListener(), plugin);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
@@ -201,43 +212,69 @@ public class RepositoryManager {
     }
     
     /**
-     * Find the installed JAR file for a plugin
+     * Find the installed JAR file for a plugin using Bukkit's plugin registry with caching
      * @param pluginName Name of the plugin
      * @return Path to the JAR file or null if not found
      */
     private Path findInstalledJar(String pluginName) {
-        // Get plugins directory from plugin's data folder parent
-        File pluginsDir = plugin.getDataFolder().getParentFile();
-        if (pluginsDir == null || !pluginsDir.exists() || !pluginsDir.isDirectory()) {
-            return null;
+        // Check cache first
+        Path cachedPath = pluginJarCache.get(pluginName);
+        if (cachedPath != null) {
+            return cachedPath;
         }
         
-        // Look for JAR file matching plugin name
-        File[] jars = pluginsDir.listFiles((dir, name) -> name.endsWith(".jar"));
-        if (jars == null) {
-            return null;
-        }
+        // Build cache from Bukkit's loaded plugins
+        buildPluginJarCache();
         
-        for (File jar : jars) {
-            // Check if JAR contains plugin.yml with matching name
-            try (var jarFile = new java.util.jar.JarFile(jar)) {
-                var entry = jarFile.getEntry("plugin.yml");
-                if (entry != null) {
-                    try (var is = jarFile.getInputStream(entry);
-                         var reader = new java.io.InputStreamReader(is)) {
-                        var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
-                        String name = yaml.getString("name");
-                        if (pluginName.equalsIgnoreCase(name)) {
-                            return jar.toPath();
-                        }
-                    }
-                }
-            } catch (Exception ignored) {
-                // Continue checking other JARs
+        // Check cache again after building
+        return pluginJarCache.get(pluginName);
+    }
+    
+    /**
+     * Build the plugin JAR cache from Bukkit's plugin manager
+     */
+    private void buildPluginJarCache() {
+        for (Plugin loadedPlugin : Bukkit.getPluginManager().getPlugins()) {
+            String name = loadedPlugin.getName();
+            File file = getPluginJarFile(loadedPlugin);
+            if (file != null && file.exists()) {
+                pluginJarCache.put(name, file.toPath());
+            }
+        }
+    }
+    
+    /**
+     * Get the JAR file for a plugin using reflection on its class
+     */
+    private File getPluginJarFile(Plugin plugin) {
+        try {
+            java.net.URL location = plugin.getClass().getProtectionDomain().getCodeSource().getLocation();
+            if (location != null) {
+                return new File(location.toURI());
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+    
+    /**
+     * Listener to invalidate cache when plugins are enabled/disabled
+     */
+    private class PluginCacheListener implements Listener {
+        @EventHandler
+        public void onPluginEnable(PluginEnableEvent event) {
+            Plugin plugin = event.getPlugin();
+            String name = plugin.getName();
+            File file = getPluginJarFile(plugin);
+            if (file != null && file.exists()) {
+                pluginJarCache.put(name, file.toPath());
             }
         }
         
-        return null;
+        @EventHandler
+        public void onPluginDisable(PluginDisableEvent event) {
+            pluginJarCache.remove(event.getPlugin().getName());
+        }
     }
     
     /**

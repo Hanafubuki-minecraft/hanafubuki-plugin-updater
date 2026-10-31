@@ -218,7 +218,8 @@ public class ModrinthSourceHandler {
     
     /**
      * Download and install a plugin from Modrinth
-     * Downloads to plugins/update/<same filename>.part, verifies hash and plugin.yml name, then atomic move
+     * Downloads to plugins/{update-folder}/<same filename>.part (from bukkit.yml settings.update-folder),
+     * verifies hash and plugin.yml name, then atomic move
      * @param pluginName Name of the plugin
      * @param downloadUrl URL to download the plugin from
      * @param installedJarPath Path to the currently installed JAR file

@@ -210,7 +210,8 @@ public class GitHubSourceHandler {
     
     /**
      * Download and install a plugin from GitHub
-     * Downloads to plugins/update/<same filename>.part, verifies plugin.yml name, then atomic move
+     * Downloads to plugins/{update-folder}/<same filename>.part (from bukkit.yml settings.update-folder),
+     * verifies plugin.yml name, then atomic move
      * @param pluginName Name of the plugin
      * @param downloadUrl URL to download the plugin from
      * @param installedJarPath Path to the currently installed JAR file
