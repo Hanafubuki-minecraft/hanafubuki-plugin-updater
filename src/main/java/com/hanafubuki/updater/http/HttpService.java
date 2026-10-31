@@ -335,11 +335,18 @@ public final class HttpService {
         return status == 429 || (status >= 500 && status <= 599);
     }
 
+    /** Retry-After as seconds ("120") or an HTTP date ("Wed, 21 Oct 2026 07:28:00 GMT"); -1 if unreadable. */
     static long parseRetryAfterMs(String value) {
+        String v = value.trim();
         try {
-            return Math.max(0, Long.parseLong(value.trim())) * 1000;
+            return Math.max(0, Long.parseLong(v)) * 1000;
         } catch (NumberFormatException e) {
-            return -1;
+            try {
+                java.time.ZonedDateTime when = java.time.ZonedDateTime.parse(v, java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME);
+                return Math.max(0, java.time.Duration.between(java.time.Instant.now(), when.toInstant()).toMillis());
+            } catch (java.time.format.DateTimeParseException ex) {
+                return -1;
+            }
         }
     }
 

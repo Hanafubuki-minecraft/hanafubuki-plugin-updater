@@ -53,6 +53,12 @@ public final class HealthServer {
 
     private static void respond(HttpExchange exchange, String contentType, Supplier<String> body) throws IOException {
         try (exchange) {
+            String path = exchange.getRequestURI().getPath();
+            if (!path.equals(exchange.getHttpContext().getPath())) {
+                // Contexts match by prefix; only the exact paths exist.
+                exchange.sendResponseHeaders(404, -1);
+                return;
+            }
             if (!"GET".equals(exchange.getRequestMethod())) {
                 exchange.getResponseHeaders().set("Allow", "GET");
                 exchange.sendResponseHeaders(405, -1);

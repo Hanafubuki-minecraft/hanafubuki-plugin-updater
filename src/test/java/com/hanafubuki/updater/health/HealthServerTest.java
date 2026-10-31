@@ -73,6 +73,14 @@ class HealthServerTest {
     }
 
     @Test
+    void onlyExactPathsAnswer() throws Exception {
+        start(() -> Map.of("status", "UP"), () -> "m");
+        assertEquals(404, send("GET", "/health/anything").statusCode());
+        assertEquals(404, send("GET", "/metricsfoo").statusCode());
+        assertEquals(404, send("GET", "/").statusCode());
+    }
+
+    @Test
     void statusIsReadOnEveryRequest() throws Exception {
         AtomicInteger calls = new AtomicInteger();
         start(() -> Map.of("calls", calls.incrementAndGet()), () -> "");

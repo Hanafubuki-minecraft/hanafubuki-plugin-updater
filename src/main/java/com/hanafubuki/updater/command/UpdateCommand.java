@@ -90,7 +90,8 @@ public final class UpdateCommand implements TabExecutor {
             help(sender, label);
             return true;
         }
-        if (!sender.hasPermission(found.get().permission())) {
+        // "update" checks its own permission: update --dry-run only needs the check node.
+        if (!sub.equals("update") && !sender.hasPermission(found.get().permission())) {
             m().send(sender, "<error>You need <accent><perm></accent> for this.", Messages.text("perm", found.get().permission()));
             return true;
         }

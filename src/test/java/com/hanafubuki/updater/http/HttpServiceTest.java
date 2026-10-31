@@ -89,11 +89,19 @@ class HttpServiceTest {
 
     @Test
     void unparsableRetryAfterFallsBackToBackoff() throws IOException {
-        server.sequence("/api", Reply.status(429).withHeader("Retry-After", "Wed, 21 Oct 2026 07:28:00 GMT"),
-                Reply.text(200, "done"));
+        server.sequence("/api", Reply.status(429).withHeader("Retry-After", "soon"), Reply.text(200, "done"));
         http.getOk(server.uri("/api"), Map.of(), TIMEOUT);
         // The test policy has a base delay of 0.
         assertEquals(List.of(0L), TestHttp.SLEEPS);
+    }
+
+    @Test
+    void retryAfterAsHttpDate() {
+        String inTenSeconds = java.time.format.DateTimeFormatter.RFC_1123_DATE_TIME
+                .format(java.time.ZonedDateTime.now(java.time.ZoneOffset.UTC).plusSeconds(10));
+        long ms = HttpService.parseRetryAfterMs(inTenSeconds);
+        assertTrue(ms > 8000 && ms <= 10_000, "got " + ms);
+        assertEquals(0, HttpService.parseRetryAfterMs("Wed, 21 Oct 2015 07:28:00 GMT"), "dates in the past mean 'now'");
     }
 
     @Test

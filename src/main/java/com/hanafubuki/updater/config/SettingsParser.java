@@ -355,18 +355,22 @@ public final class SettingsParser {
         return raw == null ? null : resolveEnv(raw, path);
     }
 
+    private static final java.util.regex.Pattern ENV_REF = java.util.regex.Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
+
+    /** Replaces every ${NAME} with the environment variable NAME, e.g. "Bearer ${TOKEN}". */
     private String resolveEnv(String raw, String path) {
-        String s = raw.trim();
-        if (s.startsWith("${") && s.endsWith("}")) {
-            String name = s.substring(2, s.length() - 1);
-            String value = env.apply(name);
+        java.util.regex.Matcher m = ENV_REF.matcher(raw.trim());
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String value = env.apply(m.group(1));
             if (value == null || value.isBlank()) {
-                problems.add(path + ": environment variable " + name + " is not set");
+                problems.add(path + ": environment variable " + m.group(1) + " is not set");
                 return null;
             }
-            return value;
+            m.appendReplacement(out, java.util.regex.Matcher.quoteReplacement(value));
         }
-        return s;
+        m.appendTail(out);
+        return out.toString();
     }
 
     private boolean bool(String path, boolean def) {
