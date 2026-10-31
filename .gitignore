@@ -33,3 +33,6 @@ run/
 
 # Local config overrides
 config.yml.local
+
+# Agent worktrees
+.claude/worktrees/

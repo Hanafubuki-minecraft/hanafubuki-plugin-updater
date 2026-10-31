@@ -335,6 +335,12 @@ public final class UpdateManager {
             return ctx.result(PluginResult.Status.FAILED, null, "invalid config: " + String.join("; ", problems));
         }
 
+        Optional<String> held = state.heldVersion(plugin.name());
+        if (held.isPresent()) {
+            return ctx.result(PluginResult.Status.SKIPPED, null, "rolled back to " + held.get()
+                    + "; automatic updates are paused until /updateplugins unstage " + plugin.name());
+        }
+
         Path staged = Installer.stagedPath(plugin, updateFolder);
         Optional<String> stagedVersion = state.stagedVersion(plugin.name());
         if (stagedVersion.isPresent() && (!Files.exists(staged)

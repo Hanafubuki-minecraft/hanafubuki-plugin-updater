@@ -132,7 +132,7 @@ public final class SettingsParser {
     private Schedule schedule() {
         Schedule d = Schedule.DISABLED;
         Schedule.Mode mode;
-        String modeText = string("schedule.mode", "off").toLowerCase(Locale.ROOT);
+        String modeText = offAware(string("schedule.mode", "off"));
         try {
             mode = Schedule.Mode.valueOf(modeText.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
@@ -169,7 +169,7 @@ public final class SettingsParser {
     }
 
     private UpdaterSettings.DependencyMode dependencyMode() {
-        String m = string("dependencies.check", "block").toUpperCase(Locale.ROOT);
+        String m = offAware(string("dependencies.check", "block")).toUpperCase(Locale.ROOT);
         try {
             return UpdaterSettings.DependencyMode.valueOf(m);
         } catch (IllegalArgumentException e) {
@@ -309,6 +309,12 @@ public final class SettingsParser {
     }
 
     // --- primitives -----------------------------------------------------------------------
+
+    /** YAML 1.1 reads an unquoted "off" as false; treat false/no like "off". */
+    private static String offAware(String value) {
+        String v = value.trim().toLowerCase(Locale.ROOT);
+        return v.equals("false") || v.equals("no") ? "off" : v;
+    }
 
     /** Reads a dotted path through nested maps. */
     private Object get(String path) {

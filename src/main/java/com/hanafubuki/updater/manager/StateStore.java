@@ -37,6 +37,8 @@ public final class StateStore {
         String last_result;
         String staged_version;
         String staged_at;
+        String held_version;
+        String held_at;
         long checks;
         long updates;
         long failures;
@@ -208,6 +210,41 @@ public final class StateStore {
             }
         });
         return out;
+    }
+
+    /**
+     * Pauses automatic updates of a plugin after a rollback. The staged update record is cleared
+     * because the rollback file replaced it.
+     */
+    public synchronized void hold(String plugin, String version, Instant when) {
+        PluginState s = plugin(plugin);
+        s.held_version = version;
+        s.held_at = when.toString();
+        s.staged_version = null;
+        s.staged_at = null;
+        save();
+    }
+
+    /**
+     * Resumes automatic updates.
+     *
+     * @return true if the plugin was held
+     */
+    public synchronized boolean release(String plugin) {
+        PluginState s = data.plugins.get(plugin);
+        if (s == null || s.held_version == null) {
+            return false;
+        }
+        s.held_version = null;
+        s.held_at = null;
+        save();
+        return true;
+    }
+
+    /** Version a plugin was rolled back to, while automatic updates are paused. */
+    public synchronized Optional<String> heldVersion(String plugin) {
+        PluginState s = data.plugins.get(plugin);
+        return Optional.ofNullable(s == null ? null : s.held_version);
     }
 
     public synchronized Optional<LastRun> lastRun() {
