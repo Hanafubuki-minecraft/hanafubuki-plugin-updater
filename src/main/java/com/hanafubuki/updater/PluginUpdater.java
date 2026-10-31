@@ -39,12 +39,11 @@ public class PluginUpdater extends JavaPlugin {
     public void onEnable() {
         this.configManager = new ConfigManager();
         this.executorService = Executors.newFixedThreadPool(4);
-        this.repositoryManager = new RepositoryManager(executorService);
         
         // Register tab completer for /updateplugins
         getCommand("updateplugins").setTabCompleter(new UpdatePluginsTabCompleter());
         
-        // Load configuration
+        // Load configuration FIRST
         try {
             configManager.loadConfig(getDataFolder());
         } catch (IOException e) {
@@ -52,6 +51,9 @@ public class PluginUpdater extends JavaPlugin {
             e.printStackTrace();
             return;
         }
+        
+        // Then create RepositoryManager with loaded configManager
+        this.repositoryManager = new RepositoryManager(executorService, configManager);
         
         // Start health check endpoint if enabled
         startHealthCheckEndpoint();
@@ -195,7 +197,7 @@ public class PluginUpdater extends JavaPlugin {
             }
             
             this.executorService = Executors.newFixedThreadPool(4);
-            this.repositoryManager = new RepositoryManager(executorService);
+            this.repositoryManager = new RepositoryManager(executorService, configManager);
             
             // Restart health check endpoint with new config
             startHealthCheckEndpoint();

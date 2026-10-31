@@ -68,10 +68,10 @@ public class RepositoryManager {
     // Dry-run mode flag
     private boolean dryRun = false;
     
-    public RepositoryManager(ExecutorService executorService) {
+    public RepositoryManager(ExecutorService executorService, ConfigManager configManager) {
         this.executorService = executorService;
         this.plugin = com.hanafubuki.updater.PluginUpdater.getPlugin(com.hanafubuki.updater.PluginUpdater.class);
-        this.configManager = new ConfigManager();
+        this.configManager = configManager;
         
         // Register listener to invalidate cache on plugin enable/disable
         Bukkit.getPluginManager().registerEvents(new PluginCacheListener(), plugin);
