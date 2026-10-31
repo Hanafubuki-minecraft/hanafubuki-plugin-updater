@@ -5,6 +5,8 @@ import java.io.IOException;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
+import java.util.concurrent.Executors;
 
 import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.Bukkit;
@@ -24,11 +26,13 @@ public class PluginUpdater extends JavaPlugin {
     
     private ConfigManager configManager;
     private RepositoryManager repositoryManager;
+    private ExecutorService executorService;
     
     @Override
     public void onEnable() {
         this.configManager = new ConfigManager();
-        this.repositoryManager = new RepositoryManager();
+        this.executorService = Executors.newFixedThreadPool(4);
+        this.repositoryManager = new RepositoryManager(executorService);
         
         // Load configuration
         try {
@@ -44,6 +48,17 @@ public class PluginUpdater extends JavaPlugin {
     
     @Override
     public void onDisable() {
+        if (executorService != null && !executorService.isShutdown()) {
+            executorService.shutdown();
+            try {
+                if (!executorService.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)) {
+                    executorService.shutdownNow();
+                }
+            } catch (InterruptedException e) {
+                executorService.shutdownNow();
+                Thread.currentThread().interrupt();
+            }
+        }
         getLogger().info("Hanafubuki Plugin Updater disabled!");
     }
     
@@ -83,12 +98,27 @@ public class PluginUpdater extends JavaPlugin {
             // Get plugin list
             Map<String, Object> plugins = configManager.getPlugins();
             
+            // Collect all update tasks
+            List<CompletableFuture<?>> updateFutures = new java.util.ArrayList<>();
+            
             // Process plugins based on mode
             if (includeOnly) {
-                updateIncludedPlugins(plugins);
+                updateIncludedPlugins(plugins, updateFutures);
             } else {
-                updateAllExceptExcluded(plugins);
+                updateAllExceptExcluded(plugins, updateFutures);
             }
+            
+            // Wait for all updates to complete
+            if (!updateFutures.isEmpty()) {
+                CompletableFuture.allOf(updateFutures.toArray(new CompletableFuture[0]))
+                    .thenRun(() -> getLogger().info("All plugin updates completed"))
+                    .exceptionally(ex -> {
+                        getLogger().severe("Error during plugin updates: " + ex.getMessage());
+                        return null;
+                    })
+                    .join(); // Wait for completion
+            }
+            
         } catch (Exception e) {
             getLogger().severe("Error during plugin updates: " + e.getMessage());
             e.printStackTrace();
@@ -98,8 +128,9 @@ public class PluginUpdater extends JavaPlugin {
     /**
      * Updates only plugins that are explicitly included in the configuration
      * @param plugins List of plugins to process
+     * @param futures List to collect update futures
      */
-    private void updateIncludedPlugins(Map<String, Object> plugins) {
+    private void updateIncludedPlugins(Map<String, Object> plugins, List<CompletableFuture<?>> futures) {
         getLogger().info("Starting update process - Include-only mode");
         
         for (Map.Entry<String, Object> entry : plugins.entrySet()) {
@@ -107,7 +138,7 @@ public class PluginUpdater extends JavaPlugin {
             
             // Check if plugin is in the included list
             if (configManager.isPluginIncluded(pluginName)) {
-                updateSinglePlugin(pluginName);
+                futures.add(updateSinglePlugin(pluginName));
             } else {
                 getLogger().info("Skipping " + pluginName + " - not in include list");
             }
@@ -117,8 +148,9 @@ public class PluginUpdater extends JavaPlugin {
     /**
      * Updates all plugins except those explicitly excluded
      * @param plugins List of plugins to process
+     * @param futures List to collect update futures
      */
-    private void updateAllExceptExcluded(Map<String, Object> plugins) {
+    private void updateAllExceptExcluded(Map<String, Object> plugins, List<CompletableFuture<?>> futures) {
         getLogger().info("Starting update process - Update all except excluded");
         
         for (Map.Entry<String, Object> entry : plugins.entrySet()) {
@@ -126,7 +158,7 @@ public class PluginUpdater extends JavaPlugin {
             
             // Check if plugin is in the excluded list
             if (!configManager.isPluginExcluded(pluginName)) {
-                updateSinglePlugin(pluginName);
+                futures.add(updateSinglePlugin(pluginName));
             } else {
                 getLogger().info("Skipping " + pluginName + " - excluded");
             }
@@ -136,29 +168,38 @@ public class PluginUpdater extends JavaPlugin {
     /**
      * Updates a single plugin
      * @param pluginName Name of the plugin to update
+     * @return CompletableFuture that completes when the update is done
      */
-    private void updateSinglePlugin(String pluginName) {
-        getLogger().info("Checking updates for " + pluginName);
-        
-        try {
-            // Get plugin details from configuration
-            Map<String, Object> pluginDetails = configManager.getPluginDetails(pluginName);
+    private CompletableFuture<?> updateSinglePlugin(String pluginName) {
+        return CompletableFuture.runAsync(() -> {
+            getLogger().info("Checking updates for " + pluginName);
             
-            // Determine source (Modrinth or GitHub)
-            String source = (String) pluginDetails.get("source");
-            
-            // Update based on source
-            if ("modrinth".equalsIgnoreCase(source)) {
-                repositoryManager.updateFromModrinth(pluginName, pluginDetails);
-            } else if ("github".equalsIgnoreCase(source)) {
-                repositoryManager.updateFromGitHub(pluginName, pluginDetails);
-            } else {
-                getLogger().warning("Unknown source for " + pluginName + ": " + source);
+            try {
+                // Get plugin details from configuration
+                Map<String, Object> pluginDetails = configManager.getPluginDetails(pluginName);
+                
+                // Validate plugin configuration
+                if (!configManager.validatePluginConfig(pluginName, pluginDetails)) {
+                    getLogger().severe("Skipping " + pluginName + " due to invalid configuration");
+                    return;
+                }
+                
+                // Determine source (Modrinth or GitHub)
+                String source = (String) pluginDetails.get("source");
+                
+                // Update based on source
+                if ("modrinth".equalsIgnoreCase(source)) {
+                    repositoryManager.updateFromModrinth(pluginName, pluginDetails);
+                } else if ("github".equalsIgnoreCase(source)) {
+                    repositoryManager.updateFromGitHub(pluginName, pluginDetails);
+                } else {
+                    getLogger().warning("Unknown source for " + pluginName + ": " + source);
+                }
+                
+            } catch (Exception e) {
+                getLogger().severe("Failed to update " + pluginName + ": " + e.getMessage());
+                e.printStackTrace();
             }
-            
-        } catch (Exception e) {
-            getLogger().severe("Failed to update " + pluginName + ": " + e.getMessage());
-            e.printStackTrace();
-        }
+        }, executorService);
     }
 }

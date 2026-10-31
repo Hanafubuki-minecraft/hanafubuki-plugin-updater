@@ -7,6 +7,7 @@ import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.logging.Logger;
 
 import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
@@ -170,5 +171,51 @@ public class ConfigManager {
      */
     public String getCommitMessage() {
         return yaml.getString("commit_message", "Plugin {plugin} updated, try restarting");
+    }
+
+    /**
+     * Validate plugin configuration
+     * @param pluginName Name of the plugin
+     * @param pluginDetails Plugin configuration map
+     * @return true if valid, false if invalid
+     */
+    public boolean validatePluginConfig(String pluginName, Map<String, Object> pluginDetails) {
+        Logger logger = plugin.getLogger();
+        
+        // Check source field
+        Object sourceObj = pluginDetails.get("source");
+        if (sourceObj == null) {
+            logger.severe("Plugin '" + pluginName + "' is missing required field 'source' (must be 'modrinth' or 'github')");
+            return false;
+        }
+        String source = sourceObj.toString().toLowerCase();
+        
+        if (!"modrinth".equals(source) && !"github".equals(source)) {
+            logger.severe("Plugin '" + pluginName + "' has invalid source: '" + source + "' (must be 'modrinth' or 'github')");
+            return false;
+        }
+        
+        // Check version field (required for both sources)
+        Object versionObj = pluginDetails.get("version");
+        if (versionObj == null || versionObj.toString().trim().isEmpty()) {
+            logger.severe("Plugin '" + pluginName + "' is missing required field 'version' (non-empty string)");
+            return false;
+        }
+        
+        // GitHub-specific validation: repo field required
+        if ("github".equals(source)) {
+            Object repoObj = pluginDetails.get("repo");
+            if (repoObj == null || repoObj.toString().trim().isEmpty()) {
+                logger.severe("Plugin '" + pluginName + "' (github source) is missing required field 'repo' (format: owner/repo)");
+                return false;
+            }
+            String repo = repoObj.toString().trim();
+            if (!repo.contains("/")) {
+                logger.severe("Plugin '" + pluginName + "' (github source) has invalid repo format: '" + repo + "' (must be owner/repo)");
+                return false;
+            }
+        }
+        
+        return true;
     }
 }

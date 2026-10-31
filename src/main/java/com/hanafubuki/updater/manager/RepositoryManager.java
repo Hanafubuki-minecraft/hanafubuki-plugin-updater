@@ -12,6 +12,7 @@ import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -34,8 +35,10 @@ public class RepositoryManager {
     private final GitHubSourceHandler gitHubHandler;
     private final JavaPlugin plugin;
     private final String serverVersion;
+    private final ExecutorService executorService;
     
-    public RepositoryManager() {
+    public RepositoryManager(ExecutorService executorService) {
+        this.executorService = executorService;
         this.plugin = com.hanafubuki.updater.PluginUpdater.getPlugin(com.hanafubuki.updater.PluginUpdater.class);
         this.httpClient = HttpClient.newBuilder()
                 .connectTimeout(Duration.ofSeconds(10))
@@ -62,21 +65,22 @@ public class RepositoryManager {
         // Get plugin logger
         Logger logger = plugin.getLogger();
         
-        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger);
+        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService);
         
         // Get GitHub token from config if available
         String githubToken = null;
         
-        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger);
+        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger, executorService);
     }
     
     /**
      * Update a plugin from Modrinth asynchronously
      * @param pluginName Name of the plugin to update
      * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
      */
-    public void updateFromModrinth(String pluginName, Map<String, Object> pluginDetails) {
-        CompletableFuture.runAsync(() -> {
+    public CompletableFuture<?> updateFromModrinth(String pluginName, Map<String, Object> pluginDetails) {
+        return CompletableFuture.runAsync(() -> {
             try {
                 // Find the installed JAR file
                 Path installedJarPath = findInstalledJar(pluginName);
@@ -127,16 +131,17 @@ public class RepositoryManager {
                 plugin.getLogger().severe("Failed to update " + pluginName + " from Modrinth: " + e.getMessage());
                 e.printStackTrace();
             }
-        });
+        }, executorService);
     }
     
     /**
      * Update a plugin from GitHub asynchronously
      * @param pluginName Name of the plugin to update
      * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
      */
-    public void updateFromGitHub(String pluginName, Map<String, Object> pluginDetails) {
-        CompletableFuture.runAsync(() -> {
+    public CompletableFuture<?> updateFromGitHub(String pluginName, Map<String, Object> pluginDetails) {
+        return CompletableFuture.runAsync(() -> {
             try {
                 // Find the installed JAR file
                 Path installedJarPath = findInstalledJar(pluginName);
@@ -180,7 +185,7 @@ public class RepositoryManager {
                 plugin.getLogger().severe("Failed to update " + pluginName + " from GitHub: " + e.getMessage());
                 e.printStackTrace();
             }
-        });
+        }, executorService);
     }
     
     /**

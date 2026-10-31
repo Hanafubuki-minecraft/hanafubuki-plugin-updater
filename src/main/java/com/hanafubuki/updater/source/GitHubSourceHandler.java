@@ -11,6 +11,8 @@ import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
 
 import com.google.gson.Gson;
@@ -32,6 +34,7 @@ public class GitHubSourceHandler {
     private final String userAgent;
     private final String githubToken;
     private final Logger logger;
+    private final ExecutorService executorService;
     
     /**
      * Constructor for GitHubSourceHandler
@@ -39,14 +42,16 @@ public class GitHubSourceHandler {
      * @param githubToken Optional GitHub personal access token for authenticated requests
      * @param pluginVersion The version of the updater plugin
      * @param logger The logger to use for output
+     * @param executorService The executor service to use for async operations
      */
-    public GitHubSourceHandler(HttpClient httpClient, String githubToken, String pluginVersion, Logger logger) {
+    public GitHubSourceHandler(HttpClient httpClient, String githubToken, String pluginVersion, Logger logger, ExecutorService executorService) {
         this.httpClient = httpClient;
         this.baseUrl = "https://api.github.com";
         this.gson = new Gson();
         this.userAgent = "ByteMe6/hanafubuki-plugin-updater/" + pluginVersion;
         this.githubToken = githubToken;
         this.logger = logger;
+        this.executorService = executorService;
     }
     
     /**

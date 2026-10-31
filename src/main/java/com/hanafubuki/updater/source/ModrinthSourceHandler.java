@@ -14,6 +14,8 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
+import java.util.concurrent.ExecutorService;
 import java.util.logging.Logger;
 
 import com.google.gson.Gson;
@@ -36,6 +38,7 @@ public class ModrinthSourceHandler {
     private final String userAgent;
     private final String serverVersion;
     private final Logger logger;
+    private final ExecutorService executorService;
     
     /**
      * Constructor for ModrinthSourceHandler
@@ -43,14 +46,16 @@ public class ModrinthSourceHandler {
      * @param serverVersion The server version to filter for (e.g., "1.21.9")
      * @param pluginVersion The version of the updater plugin
      * @param logger The logger to use for output
+     * @param executorService The executor service to use for async operations
      */
-    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger) {
+    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger, ExecutorService executorService) {
         this.httpClient = httpClient;
         this.baseUrl = "https://api.modrinth.com/v2";
         this.gson = new Gson();
         this.userAgent = "ByteMe6/hanafubuki-plugin-updater/" + pluginVersion;
         this.serverVersion = serverVersion;
         this.logger = logger;
+        this.executorService = executorService;
     }
     
     /**
