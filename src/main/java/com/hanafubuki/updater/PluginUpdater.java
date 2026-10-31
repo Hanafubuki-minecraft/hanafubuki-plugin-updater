@@ -41,6 +41,9 @@ public class PluginUpdater extends JavaPlugin {
         this.executorService = Executors.newFixedThreadPool(4);
         this.repositoryManager = new RepositoryManager(executorService);
         
+        // Register tab completer for /updateplugins
+        getCommand("updateplugins").setTabCompleter(new UpdatePluginsTabCompleter());
+        
         // Load configuration
         try {
             configManager.loadConfig(getDataFolder());

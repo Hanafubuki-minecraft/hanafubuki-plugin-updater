@@ -7,7 +7,7 @@ description: Automatically updates plugins from Modrinth and GitHub sources
 commands:
   updateplugins:
     description: Update plugins from Modrinth and GitHub
-    usage: /updateplugins
+    usage: /updateplugins [--dry-run|reload|discover|metrics]
     permission: hanafubuki.updater.update
 permissions:
   hanafubuki.updater.update:

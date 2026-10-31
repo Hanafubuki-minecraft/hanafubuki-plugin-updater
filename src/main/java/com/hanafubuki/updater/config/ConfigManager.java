@@ -135,6 +135,37 @@ public class ConfigManager {
     }
     
     /**
+     * Get configured plugin names (for tab completion)
+     * @return Set of plugin names in config
+     */
+    public java.util.Set<String> getConfiguredPluginNames() {
+        ConfigurationSection section = yaml.getConfigurationSection("plugins");
+        if (section == null) {
+            return java.util.Collections.emptySet();
+        }
+        return section.getKeys(false);
+    }
+    
+    /**
+     * Static helper for tab completer access
+     * @return Set of plugin names in config
+     */
+    public static java.util.Set<String> getConfiguredPluginNamesStatic() {
+        try {
+            var plugin = com.hanafubuki.updater.PluginUpdater.getPlugin(com.hanafubuki.updater.PluginUpdater.class);
+            var field = plugin.getClass().getDeclaredField("configManager");
+            field.setAccessible(true);
+            var cm = field.get(plugin);
+            if (cm != null) {
+                var method = cm.getClass().getMethod("getConfiguredPluginNames");
+                return (java.util.Set<String>) method.invoke(cm);
+            }
+        } catch (Exception ignored) {
+        }
+        return java.util.Collections.emptySet();
+    }
+    
+    /**
      * Get details for a specific plugin
      * @param pluginName Name of the plugin
      * @return Plugin configuration map
@@ -546,15 +577,6 @@ public class ConfigManager {
         }
         
         return true;
-    }
-
-    /**
-     * Get all configured plugin names
-     * @return Set of configured plugin names
-     */
-    public Set<String> getConfiguredPluginNames() {
-        ConfigurationSection section = yaml.getConfigurationSection("plugins");
-        return section != null ? section.getKeys(false) : Collections.emptySet();
     }
 
     /**
