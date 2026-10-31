@@ -6,6 +6,12 @@ on:
     paths:
       - 'gradle.properties'
       - 'src/main/resources/plugin.yml'
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (optional, reads from gradle.properties if not provided)'
+        required: false
+        type: string
 
 jobs:
   release:
