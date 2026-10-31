@@ -4,8 +4,8 @@
 # same file name as the installed jar. Paper swaps them in on the next restart; running jars
 # are never touched. All network work runs in the background.
 #
-# Values written as "${NAME}" are read from the environment variable NAME. Use this for
-# tokens and webhook URLs so secrets do not live in this file.
+# "${NAME}" anywhere in a value is replaced with the environment variable NAME, e.g.
+# token: "${GITHUB_TOKEN}" or "Bearer ${TOKEN}". Use this so secrets do not live in this file.
 #
 # Docs: https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/tree/master/docs
 

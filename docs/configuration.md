@@ -50,9 +50,9 @@ A value written as `"${NAME}"` is replaced by the environment variable `NAME`. T
 | values of `notifications.webhook.headers` | |
 | values of a custom source's `headers` and `auth` fields | resolved when the plugin is checked |
 
-The **whole value** must be the reference. `"${GITHUB_TOKEN}"` works; text around the reference
-(for example `"Bearer ${TOKEN}"`) is not substituted and is sent literally. For a bearer token on a
-custom source use `auth: { type: bearer, token: "${TOKEN}" }`.
+References can stand alone (`"${GITHUB_TOKEN}"`) or sit inside text (`"Bearer ${TOKEN}"`,
+`"https://hooks.example.com/${HOOK_ID}"`); every `${NAME}` is replaced and the value is copied literally,
+so `$` or `\` inside a secret are safe.
 
 If the variable is not set, the problem is reported and the value counts as empty (the token is not
 used, a webhook with that URL is turned off, a header is left out; a custom source fails its check
@@ -108,7 +108,7 @@ schedule and the next planned run.
 
 | Key | Default | Allowed | Meaning |
 |---|---|---|---|
-| `enabled` | `true` | bool | Copy the running jar into `plugins/HanafubukiPluginUpdater/backups/` before an update is downloaded. If the copy fails, the update is not installed. |
+| `enabled` | `true` | bool | Copy the running jar into `plugins/HanafubukiPluginUpdater/backups/` right before an update is staged (after the download passed checksum, name and dependency checks, so blocked or broken downloads never use up backup slots). If the copy fails, the update is not installed. Plugin names are matched case-insensitively. |
 | `keep` | `3` | 1–100 | Backups kept per plugin; older ones are deleted. |
 
 Backups are what `/updateplugins rollback` and the backups view of the GUI restore. Layout and rollback
@@ -186,7 +186,7 @@ retry policy (3 retries); failures are logged and never affect updates.
 |---|---|---|
 | `webhook.enabled` | `false` | POST a JSON document after each run. |
 | `webhook.url` | `""` | Must be `https`, otherwise the webhook is turned off and a problem is reported. |
-| `webhook.headers` | `{}` | Extra request headers, e.g. `Authorization`. Values may be `"${NAME}"` (whole value only). |
+| `webhook.headers` | `{}` | Extra request headers, e.g. `Authorization`. Values may contain `${NAME}` references, e.g. `"Bearer ${TOKEN}"`. |
 | `webhook.events` | all five | Same event names as Discord. |
 
 The request is `POST <url>` with `Content-Type: application/json` and the updater's User-Agent. Redirects are

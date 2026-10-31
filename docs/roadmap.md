@@ -96,6 +96,12 @@ The plugin was rewritten. Configs from 1.2.x keep working: the same sections and
 - Update notifications were broadcast to all players; now only to `hanafubuki.updater.notify`.
 - Config writes from parallel checks were not thread-safe.
 - The default `config.yml` was not valid YAML.
+- Unquoted `off` and `4:30` in YAML (read as `false` and `270`) are understood.
+- Server locale no longer changes JSON output or messages (`Locale.ROOT` everywhere; Turkish locale broke
+  webhook JSON).
+- Found while testing the rewrite: a cancelled run with queued plugins hung forever; a new run was refused
+  right after the previous one finished; Discord messages over 6000 characters were rejected; reloading
+  could block the main thread for up to 5 seconds.
 
 **Security**
 

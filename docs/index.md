@@ -45,7 +45,7 @@ its own node. All nodes default to op.
 | `/updateplugins` | Same as `update`: check all plugins and download updates (kept from 1.x) | `hanafubuki.updater.update` |
 | `/updateplugins check [plugins…]` | Check for updates, download nothing | `hanafubuki.updater.check` |
 | `/updateplugins --dry-run` (`-d`, `dry-run`) | Same as `check` | `hanafubuki.updater.check` |
-| `/updateplugins update [all\|plugins…] [--dry-run]` | Download updates (all, or only the named plugins); applied on restart. `--dry-run` / `-d` makes it a check | `hanafubuki.updater.update` |
+| `/updateplugins update [all\|plugins…] [--dry-run]` | Download updates (all, or only the named plugins); applied on restart. `--dry-run` / `-d` makes it a check | `hanafubuki.updater.update` (`check` is enough with `--dry-run`) |
 | `/updateplugins stop` | Cancel the running check | `hanafubuki.updater.stop` |
 | `/updateplugins status` | Running or not, tracked plugins, schedule and next run, last run, updates waiting for a restart, notification targets, config problems | `hanafubuki.updater.status` |
 | `/updateplugins stats [plugin]` | Checks, updates, failures, last update, average interval, last result | `hanafubuki.updater.stats` |
@@ -70,7 +70,7 @@ is active.
 |---|---|
 | `hanafubuki.updater.*` | all nodes below |
 | `hanafubuki.updater.use` | `/updateplugins` at all |
-| `hanafubuki.updater.check` | `check`, `--dry-run`; GUI left click and "Check all" |
+| `hanafubuki.updater.check` | `check`, `--dry-run`, `update --dry-run`; GUI left click and "Check all" |
 | `hanafubuki.updater.update` | `update`, plain `/updateplugins`; GUI shift + left click and "Update all" |
 | `hanafubuki.updater.stop` | `stop`; GUI "Stop" |
 | `hanafubuki.updater.status` | `status`; GUI "Status" |

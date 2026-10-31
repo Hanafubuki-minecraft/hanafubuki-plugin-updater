@@ -102,7 +102,7 @@ flowchart TD
     F -->|no| R2[UP_TO_DATE / NO_VERSION / SKIPPED]
     F -->|yes| G{already staged? dry run?}
     G -->|yes| R3[ALREADY_STAGED / AVAILABLE]
-    G -->|no| H[backup, download, verify, stage]
+    G -->|no| H[download, verify, backup, stage]
     H --> R4[UPDATED / BLOCKED / FAILED]
 ```
 
@@ -120,7 +120,9 @@ flowchart TD
 7. Skip if the new version is above `max_version`.
 8. `ALREADY_STAGED` if the staged file matches the candidate's checksum (or, without a checksum, the version
    recorded in `state.json`). `AVAILABLE` in a dry run.
-9. Back up the running jar (if `backups.enabled`), then `Installer.stage()`.
+9. `Installer.stage()` downloads into a temporary file and verifies checksum and plugin name; then the
+   dependency check runs and, only if everything passed, the running jar is backed up (if
+   `backups.enabled`) right before the new file is moved into the update folder.
 
 ### Result statuses
 
