@@ -53,9 +53,29 @@ tasks.processResources {
 }
 
 tasks.test {
-    useJUnitPlatform()
+    // Contract tests call the real Modrinth, Hangar, Spiget and GitHub APIs; they run only in contractTest.
+    useJUnitPlatform {
+        excludeTags("contract")
+    }
     testLogging {
         events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
+}
+
+// Not wired into check/build: needs network access and is subject to API rate limits.
+val contractTest by tasks.registering(Test::class) {
+    group = "verification"
+    description = "Runs contract tests (JUnit tag 'contract') against the real Modrinth, Hangar, Spiget and GitHub APIs."
+    testClassesDirs = sourceSets.test.get().output.classesDirs
+    classpath = sourceSets.test.get().runtimeClasspath
+    useJUnitPlatform {
+        includeTags("contract")
+    }
+    // Results depend on remote APIs, never reuse a previous run.
+    outputs.upToDateWhen { false }
+    testLogging {
+        events("passed", "skipped", "failed")
         exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
     }
 }
