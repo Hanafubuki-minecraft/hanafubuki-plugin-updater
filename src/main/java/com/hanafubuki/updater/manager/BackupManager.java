@@ -148,14 +148,31 @@ public final class BackupManager {
         }
         Files.createDirectories(updateFolder);
         Path target = updateFolder.resolve(installed.jar().getFileName().toString());
-        Path tmp = updateFolder.resolve(target.getFileName() + ".rollback.part");
-        Files.copy(chosen.file(), tmp, StandardCopyOption.REPLACE_EXISTING);
-        Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        Path tmp = updateFolder.resolve("." + target.getFileName() + ".rollback.part");
+        try {
+            Files.copy(chosen.file(), tmp, StandardCopyOption.REPLACE_EXISTING);
+            Files.move(tmp, target, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
+        } finally {
+            Files.deleteIfExists(tmp);
+        }
         return chosen;
     }
 
+    /** Backup folder of a plugin; an existing folder whose name differs only in case is reused. */
     private Path pluginDir(String plugin) {
-        return root.resolve(safe(plugin));
+        String name = safe(plugin);
+        if (Files.isDirectory(root)) {
+            try (Stream<Path> dirs = Files.list(root)) {
+                Optional<Path> existing = dirs.filter(Files::isDirectory)
+                        .filter(d -> d.getFileName().toString().equalsIgnoreCase(name)).findFirst();
+                if (existing.isPresent()) {
+                    return existing.get();
+                }
+            } catch (IOException ignored) {
+                // Fall back to the exact name.
+            }
+        }
+        return root.resolve(name);
     }
 
     /** File-name safe version of a plugin name or version. */

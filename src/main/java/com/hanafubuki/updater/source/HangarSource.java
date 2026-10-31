@@ -133,7 +133,30 @@ public final class HangarSource implements UpdateSource {
         }
         String name = Json.str(latest, "name");
         return Optional.of(new UpdateCandidate(name, URI.create(downloadUrl(latest)), checksum, Map.of(), freshness,
-                "https://hangar.papermc.io/" + slug + "/versions/" + name, notes));
+                pageUrl(configured, slug, name), notes));
+    }
+
+    /**
+     * Web page of a version. Hangar pages need the owner (hangar.papermc.io/Owner/Slug/versions/x);
+     * when the config only has the slug, the owner is read from the project. Null if unknown.
+     */
+    private String pageUrl(String configured, String slug, String version) {
+        String ownerSlug = configured.contains("/") ? configured : null;
+        if (ownerSlug == null) {
+            try {
+                HttpService.Response r = http.get(URI.create(baseUrl + "/projects/" + encode(slug)),
+                        Map.of("Accept", "application/json"), settings.source().apiTimeout());
+                if (r.status() == 200) {
+                    JsonObject ns = Json.obj(Json.parseObject(r.body(), "Hangar project " + slug), "namespace");
+                    if (Json.str(ns, "owner") != null && Json.str(ns, "slug") != null) {
+                        ownerSlug = Json.str(ns, "owner") + "/" + Json.str(ns, "slug");
+                    }
+                }
+            } catch (IOException e) {
+                return null;
+            }
+        }
+        return ownerSlug == null ? null : "https://hangar.papermc.io/" + ownerSlug + "/versions/" + encode(version);
     }
 
     /** Direct download URL, or an external URL that points at a .jar. Null otherwise. */

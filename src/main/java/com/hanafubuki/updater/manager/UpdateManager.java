@@ -421,30 +421,28 @@ public final class UpdateManager {
             return ctx.result(PluginResult.Status.AVAILABLE, candidate.version(), null);
         }
 
-        if (settings.backups().enabled()) {
-            try {
-                backups.backup(plugin, settings.backups().keep());
-            } catch (IOException e) {
-                if (e instanceof InterruptedIOException) {
-                    throw e;
-                }
-                throw new IOException("Backup of the current jar failed, update not installed: " + e.getMessage(), e);
-            }
-        }
-
         ctx.downloading = true;
+        // Runs after the download passed checksum and name checks, right before it is staged.
         Installer.Verifier verifier = (descriptor, file) -> {
-            if (settings.dependencies() == UpdaterSettings.DependencyMode.OFF) {
-                return;
+            if (settings.dependencies() != UpdaterSettings.DependencyMode.OFF) {
+                List<String> depProblems = DependencyChecker.check(descriptor, installed.keySet(), mcVersion);
+                if (!depProblems.isEmpty() && settings.dependencies() == UpdaterSettings.DependencyMode.BLOCK) {
+                    throw new BlockedException("Version " + candidate.version() + " " + String.join("; ", depProblems),
+                            candidate.version());
+                }
+                ctx.notes.addAll(depProblems);
             }
-            List<String> depProblems = DependencyChecker.check(descriptor, installed.keySet(), mcVersion);
-            if (depProblems.isEmpty()) {
-                return;
+            // The backup is made only for an update that will really be staged, so blocked or broken
+            // downloads never push older backups out.
+            if (settings.backups().enabled()) {
+                try {
+                    backups.backup(plugin, settings.backups().keep());
+                } catch (InterruptedIOException e) {
+                    throw e;
+                } catch (IOException e) {
+                    throw new IOException("Backup of the current jar failed, update not installed: " + e.getMessage(), e);
+                }
             }
-            if (settings.dependencies() == UpdaterSettings.DependencyMode.BLOCK) {
-                throw new BlockedException("Version " + candidate.version() + " " + String.join("; ", depProblems), candidate.version());
-            }
-            ctx.notes.addAll(depProblems);
         };
         installer.stage(plugin, candidate, updateFolder, settings.downloadTimeout(entry.source()),
                 settings.general().maxDownloadBytes(), verifier);

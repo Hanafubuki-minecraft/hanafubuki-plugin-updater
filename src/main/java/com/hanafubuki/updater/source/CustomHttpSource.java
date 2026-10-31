@@ -38,7 +38,7 @@ import com.hanafubuki.updater.util.JsonPath;
  */
 public final class CustomHttpSource implements UpdateSource {
 
-    private static final Pattern ENV_REF = Pattern.compile("^\\$\\{([A-Za-z_][A-Za-z0-9_]*)}$");
+    private static final Pattern ENV_REF = Pattern.compile("\\$\\{([A-Za-z_][A-Za-z0-9_]*)}");
     private static final List<String> VERSION_FIELDS = List.of("version", "latest_version", "version_number", "tag_name", "name");
     private static final List<String> URL_FIELDS = List.of("download_url", "url", "browser_download_url", "file_url", "asset_url");
     private static final List<String> CHECKSUM_FIELDS = List.of("sha512", "sha256", "checksum", "hash", "digest");
@@ -123,7 +123,8 @@ public final class CustomHttpSource implements UpdateSource {
 
         Checksum checksum = null;
         if (entry.string("checksum") != null) {
-            checksum = Checksum.parse(entry.string("checksum")).orElse(null);
+            checksum = Checksum.parse(entry.string("checksum"))
+                    .orElseThrow(() -> new IOException("checksum is not a SHA-1, SHA-256 or SHA-512 hex digest"));
         } else {
             String raw = read(root, entry.string("checksum_path"), CHECKSUM_FIELDS);
             if (raw != null) {
@@ -206,16 +207,18 @@ public final class CustomHttpSource implements UpdateSource {
         return String.valueOf(v);
     }
 
-    /** Replaces "${NAME}" with the environment variable NAME. */
+    /** Replaces every "${NAME}" in the value with the environment variable NAME, e.g. "Bearer ${TOKEN}". */
     String resolve(String value) throws IOException {
-        Matcher m = ENV_REF.matcher(value.trim());
-        if (!m.matches()) {
-            return value;
+        Matcher m = ENV_REF.matcher(value);
+        StringBuilder out = new StringBuilder();
+        while (m.find()) {
+            String resolved = env.apply(m.group(1));
+            if (resolved == null || resolved.isEmpty()) {
+                throw new IOException("Environment variable " + m.group(1) + " is not set");
+            }
+            m.appendReplacement(out, Matcher.quoteReplacement(resolved));
         }
-        String resolved = env.apply(m.group(1));
-        if (resolved == null || resolved.isEmpty()) {
-            throw new IOException("Environment variable " + m.group(1) + " is not set");
-        }
-        return resolved;
+        m.appendTail(out);
+        return out.toString();
     }
 }

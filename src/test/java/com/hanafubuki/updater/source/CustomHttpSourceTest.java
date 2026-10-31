@@ -232,6 +232,26 @@ class CustomHttpSourceTest {
     }
 
     @Test
+    void environmentReferencesInsideValues() throws IOException {
+        env.put("TOKEN", "abc$1\\x");
+        api(obj("version", "2.0", "download_url", "/a.jar").toString());
+
+        find(options("headers", Map.of("Authorization", "Bearer ${TOKEN}", "X-Path", "/teams/${TOKEN}/x")));
+
+        FakeHttpServer.Request r = server.requests("/api/latest").get(0);
+        assertEquals("Bearer abc$1\\x", r.header("Authorization"));
+        assertEquals("/teams/abc$1\\x/x", r.header("X-Path"));
+    }
+
+    @Test
+    void invalidChecksumOptionIsAnError() {
+        api(obj("version", "2.0", "download_url", "/a.jar").toString());
+
+        IOException e = assertThrows(IOException.class, () -> find(options("checksum", "not-a-hash")));
+        assertTrue(e.getMessage().contains("checksum"), e.getMessage());
+    }
+
+    @Test
     void missingEnvironmentVariableIsAnError() {
         api(obj("version", "2.0", "download_url", "/a.jar").toString());
 

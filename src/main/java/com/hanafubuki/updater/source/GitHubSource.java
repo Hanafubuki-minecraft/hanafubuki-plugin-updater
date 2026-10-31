@@ -304,6 +304,13 @@ public final class GitHubSource implements UpdateSource {
         if (Json.num(asset, "size", 0) > 64 * 1024) {
             return "";
         }
+        String apiUrl = Json.str(asset, "url");
+        if (settings.token() != null && !settings.token().isBlank() && apiUrl != null) {
+            // Private repositories: browser URLs need a session, the API asset URL works with the token.
+            Map<String, String> headers = new LinkedHashMap<>(apiHeaders());
+            headers.put("Accept", "application/octet-stream");
+            return http.getOk(URI.create(apiUrl), headers, settings.source().apiTimeout());
+        }
         return http.getOk(URI.create(Json.str(asset, "browser_download_url")), Map.of(), settings.source().apiTimeout());
     }
 

@@ -52,6 +52,22 @@ class BackupManagerTest {
     }
 
     @Test
+    void pluginNamesAreCaseInsensitive() throws IOException {
+        backups.backup(install("1.0"), 3);
+        tick();
+        backups.backup(install("1.1"), 3);
+
+        assertEquals(2, backups.list("chunky").size());
+        assertEquals(2, backups.list("CHUNKY").size());
+        BackupManager.Backup restored = backups.restore("1.0", new InstalledPlugin("chunky", "1.1", plugins.resolve("Chunky.jar")), updateFolder);
+        assertEquals("1.0", restored.version());
+        try (var files = Files.list(updateFolder)) {
+            assertEquals(List.of("Chunky.jar"), files.map(p -> p.getFileName().toString()).sorted().toList(),
+                    "no temporary rollback file is left behind");
+        }
+    }
+
+    @Test
     void backupCopiesTheInstalledJar() throws IOException {
         InstalledPlugin p = install("1.4.10");
 

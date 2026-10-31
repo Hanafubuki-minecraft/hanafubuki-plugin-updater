@@ -459,6 +459,24 @@ class GitHubSourceTest {
     // --- token and download ------------------------------------------------------------------
 
     @Test
+    void withTokenSidecarChecksumsAreReadThroughTheApi() throws IOException {
+        // Private repositories: browser URLs answer 404 without a session; the API asset URL works with the token.
+        String sidecar = sha512("private");
+        JsonObject jar = asset("Plugin.jar", null);
+        JsonObject sum = asset("Plugin.jar.sha512", 200, null);
+        latest(release("v2.1.0", "", false, jar, sum));
+        String apiPath = java.net.URI.create(sum.get("url").getAsString()).getPath();
+        server.route(apiPath, r -> "Bearer ghp_secret".equals(r.header("Authorization"))
+                && "application/octet-stream".equals(r.header("Accept"))
+                ? FakeHttpServer.Reply.text(200, sidecar + "  Plugin.jar\n") : FakeHttpServer.Reply.status(404));
+
+        UpdateCandidate c = source("ghp_secret", GitHubSource.SignatureMode.OFF).findLatest(request(Map.of())).orElseThrow();
+
+        assertEquals(new Checksum(Checksum.Algorithm.SHA512, sidecar), c.checksum());
+        assertTrue(server.requests("/dl/Plugin.jar.sha512").isEmpty());
+    }
+
+    @Test
     void withTokenTheApiAssetUrlIsDownloadedWithAuthorization() throws IOException {
         JsonObject jar = asset("Plugin.jar", "sha256:" + sha256("x"));
         latest(release("v2.1.0", "", false, jar));

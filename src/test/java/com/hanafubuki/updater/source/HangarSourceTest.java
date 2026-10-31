@@ -143,7 +143,28 @@ class HangarSourceTest {
 
         assertEquals("5.12.2", c.version());
         assertEquals(1, server.requests(VERSIONS).size());
-        assertEquals("https://hangar.papermc.io/ViaVersion/versions/5.12.2", c.pageUrl());
+        assertEquals("https://hangar.papermc.io/ViaVersion/ViaVersion/versions/5.12.2", c.pageUrl());
+    }
+
+    @Test
+    void pageUrlOwnerIsReadFromTheProjectWhenOnlyTheSlugIsConfigured() throws IOException {
+        page(VERSIONS, version("5.12.2", "Release", "2026-09-01T00:00:00Z", sha256("rel"), List.of(MC)));
+        server.json(VERSIONS.substring(0, VERSIONS.lastIndexOf("/versions")),
+                "{\"namespace\":{\"owner\":\"ViaVersionTeam\",\"slug\":\"ViaVersion\"}}");
+
+        UpdateCandidate c = source().findLatest(request(Map.of("project_slug", "ViaVersion"))).orElseThrow();
+
+        assertEquals("https://hangar.papermc.io/ViaVersionTeam/ViaVersion/versions/5.12.2", c.pageUrl());
+    }
+
+    @Test
+    void pageUrlIsNullWhenTheProjectCannotBeRead() throws IOException {
+        page(VERSIONS, version("5.12.2", "Release", "2026-09-01T00:00:00Z", sha256("rel"), List.of(MC)));
+
+        UpdateCandidate c = source().findLatest(request(Map.of("project_slug", "ViaVersion"))).orElseThrow();
+
+        assertEquals("5.12.2", c.version());
+        assertNull(c.pageUrl());
     }
 
     @Test

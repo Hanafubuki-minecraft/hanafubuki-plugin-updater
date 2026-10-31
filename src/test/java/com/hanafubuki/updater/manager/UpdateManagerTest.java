@@ -804,6 +804,15 @@ class UpdateManagerTest {
     }
 
     @Test
+    void blockedUpdateMakesNoBackup() throws IOException {
+        install("Chunky", "1.0");
+        source.answer("Chunky", published("Chunky", "2.0", Freshness.UNKNOWN, List.of("Vault"), null));
+
+        assertEquals(PluginResult.Status.BLOCKED, only(run(settings("dependencies:\n  check: block\n", CHUNKY))).status());
+        assertEquals(List.of(), backups.list("Chunky"), "older backups must not be pushed out by an update that is not installed");
+    }
+
+    @Test
     void tooNewApiVersionBlocks() throws IOException {
         install("Chunky", "1.0");
         source.answer("Chunky", published("Chunky", "2.0", Freshness.UNKNOWN, List.of(), "1.22"));
