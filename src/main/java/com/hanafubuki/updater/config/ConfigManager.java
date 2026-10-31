@@ -148,12 +148,44 @@ public class ConfigManager {
     }
     
     /**
+     * Get Modrinth API timeout in seconds
+     * @return API timeout (default: 10)
+     */
+    public int getModrinthApiTimeout() {
+        return yaml.getInt("modrinth.timeout", 10);
+    }
+    
+    /**
+     * Get Modrinth download timeout in seconds
+     * @return Download timeout (default: 60)
+     */
+    public int getModrinthDownloadTimeout() {
+        return yaml.getInt("modrinth.download_timeout", 60);
+    }
+    
+    /**
      * Get GitHub configuration
      * @return GitHub configuration map
      */
     public Map<String, Object> getGitHubConfig() {
         ConfigurationSection section = yaml.getConfigurationSection("github");
         return section != null ? section.getValues(false) : Map.of();
+    }
+    
+    /**
+     * Get GitHub API timeout in seconds
+     * @return API timeout (default: 10)
+     */
+    public int getGitHubApiTimeout() {
+        return yaml.getInt("github.timeout", 10);
+    }
+    
+    /**
+     * Get GitHub download timeout in seconds
+     * @return Download timeout (default: 60)
+     */
+    public int getGitHubDownloadTimeout() {
+        return yaml.getInt("github.download_timeout", 60);
     }
     
     /**

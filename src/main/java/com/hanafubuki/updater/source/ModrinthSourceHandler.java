@@ -39,6 +39,9 @@ public class ModrinthSourceHandler {
     private final String serverVersion;
     private final Logger logger;
     private final ExecutorService executorService;
+    private final int apiTimeoutSeconds;
+    private final int downloadTimeoutSeconds;
+    private final String updateFolderName;
     
     /**
      * Constructor for ModrinthSourceHandler
@@ -47,8 +50,11 @@ public class ModrinthSourceHandler {
      * @param pluginVersion The version of the updater plugin
      * @param logger The logger to use for output
      * @param executorService The executor service to use for async operations
+     * @param apiTimeoutSeconds API request timeout in seconds
+     * @param downloadTimeoutSeconds Download timeout in seconds
+     * @param updateFolderName The name of the update folder (from bukkit.yml settings.update-folder)
      */
-    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger, ExecutorService executorService) {
+    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger, ExecutorService executorService, int apiTimeoutSeconds, int downloadTimeoutSeconds, String updateFolderName) {
         this.httpClient = httpClient;
         this.baseUrl = "https://api.modrinth.com/v2";
         this.gson = new Gson();
@@ -56,6 +62,9 @@ public class ModrinthSourceHandler {
         this.serverVersion = serverVersion;
         this.logger = logger;
         this.executorService = executorService;
+        this.apiTimeoutSeconds = apiTimeoutSeconds;
+        this.downloadTimeoutSeconds = downloadTimeoutSeconds;
+        this.updateFolderName = updateFolderName != null ? updateFolderName : "update";
     }
     
     /**
@@ -80,7 +89,7 @@ public class ModrinthSourceHandler {
             String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=[\"paper\"]&game_versions=[\"" + serverVersion + "\"]";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
                     .GET()
@@ -163,7 +172,7 @@ public class ModrinthSourceHandler {
             String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=[\"paper\"]&game_versions=[\"" + serverVersion + "\"]";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
                     .GET()
@@ -220,7 +229,7 @@ public class ModrinthSourceHandler {
         try {
             // Determine target filename (same as installed jar)
             String targetFileName = installedJarPath.getFileName().toString();
-            Path updateDir = installedJarPath.getParent().resolve("update");
+            Path updateDir = installedJarPath.getParent().resolve(updateFolderName);
             Files.createDirectories(updateDir);
             
             Path tempFile = updateDir.resolve(targetFileName + ".part");
@@ -231,7 +240,7 @@ public class ModrinthSourceHandler {
             
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(downloadUrl))
-                    .timeout(Duration.ofSeconds(60))
+                    .timeout(Duration.ofSeconds(downloadTimeoutSeconds))
                     .header("User-Agent", userAgent)
                     .GET()
                     .build();
@@ -305,7 +314,7 @@ public class ModrinthSourceHandler {
             String url = baseUrl + "/version_file/" + sha512 + "?algorithm=sha512";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(url))
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
                     .GET()
@@ -378,7 +387,7 @@ public class ModrinthSourceHandler {
             String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=[\"paper\"]&game_versions=[\"" + serverVersion + "\"]";
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
-                    .timeout(Duration.ofSeconds(10))
+                    .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
                     .GET()

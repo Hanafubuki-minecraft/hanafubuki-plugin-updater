@@ -19,6 +19,7 @@ import org.bukkit.ChatColor;
 import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import com.hanafubuki.updater.config.ConfigManager;
 import com.hanafubuki.updater.source.ModrinthSourceHandler;
 import com.hanafubuki.updater.source.GitHubSourceHandler;
 import com.hanafubuki.updater.util.VersionUtils;
@@ -36,6 +37,7 @@ public class RepositoryManager {
     private final JavaPlugin plugin;
     private final String serverVersion;
     private final ExecutorService executorService;
+    private final String updateFolderName;
     
     public RepositoryManager(ExecutorService executorService) {
         this.executorService = executorService;
@@ -65,12 +67,22 @@ public class RepositoryManager {
         // Get plugin logger
         Logger logger = plugin.getLogger();
         
-        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService);
+        // Read update folder name from bukkit.yml
+        this.updateFolderName = readUpdateFolderFromBukkitYml();
+        
+        // Load config manager to get timeout settings
+        ConfigManager configManager = new ConfigManager();
+        int modrinthApiTimeout = configManager.getModrinthApiTimeout();
+        int modrinthDownloadTimeout = configManager.getModrinthDownloadTimeout();
+        int githubApiTimeout = configManager.getGitHubApiTimeout();
+        int githubDownloadTimeout = configManager.getGitHubDownloadTimeout();
+        
+        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService, modrinthApiTimeout, modrinthDownloadTimeout, this.updateFolderName);
         
         // Get GitHub token from config if available
         String githubToken = null;
         
-        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger, executorService);
+        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger, executorService, githubApiTimeout, githubDownloadTimeout, this.updateFolderName);
     }
     
     /**
@@ -238,5 +250,36 @@ public class RepositoryManager {
                         ChatColor.WHITE + ", try restarting";
         
         Bukkit.broadcastMessage(message);
+    }
+    
+    /**
+     * Read the update folder name from bukkit.yml
+     * @return The update folder name, defaulting to "update"
+     */
+    private String readUpdateFolderFromBukkitYml() {
+        try {
+            // bukkit.yml is in the server root: plugin.getDataFolder().getParentFile().getParentFile()
+            File serverRoot = plugin.getDataFolder().getParentFile().getParentFile();
+            if (serverRoot == null) {
+                return "update";
+            }
+            
+            File bukkitYml = new File(serverRoot, "bukkit.yml");
+            if (!bukkitYml.exists()) {
+                return "update";
+            }
+            
+            var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(bukkitYml);
+            String updateFolder = yaml.getString("settings.update-folder");
+            
+            if (updateFolder == null || updateFolder.isEmpty()) {
+                return "update";
+            }
+            
+            return updateFolder;
+        } catch (Exception e) {
+            plugin.getLogger().warning("Failed to read update folder from bukkit.yml, using default 'update': " + e.getMessage());
+            return "update";
+        }
     }
 }

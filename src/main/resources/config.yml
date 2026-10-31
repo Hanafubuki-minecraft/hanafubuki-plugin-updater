@@ -40,8 +40,11 @@ modrinth:
   # Custom User-Agent (optional, defaults to plugin name/version)
   # user_agent: "MyServer/Updater/1.0"
   
-  # Request timeout in seconds (default: 10)
+  # API request timeout in seconds (default: 10)
   # timeout: 10
+  
+  # Download timeout in seconds (default: 60)
+  # download_timeout: 60
   
   # Default loader filter (default: ["paper"])
   # loaders: ["paper", "spigot"]
@@ -56,8 +59,11 @@ github:
   # Custom User-Agent (optional, defaults to plugin name/version)
   # user_agent: "MyServer/Updater/1.0"
   
-  # Request timeout in seconds (default: 10)
+  # API request timeout in seconds (default: 10)
   # timeout: 10
+  
+  # Download timeout in seconds (default: 60)
+  # download_timeout: 60
   
   # GitHub token for authenticated requests (optional, increases rate limit)
   # Get token at: https://github.com/settings/tokens

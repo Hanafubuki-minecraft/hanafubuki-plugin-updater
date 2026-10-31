@@ -2,77 +2,42 @@
 
 # Hanafubuki Plugin Updater
 
-[![Paper](https://img.shields.io/badge/Paper-1.21.9-blue)](https://papermc.io/)
-[![Java](https://img.shields.io/badge/Java-21-orange)](https://adoptium.net/)
-[![Gradle](https://img.shields.io/badge/Gradle-Kotlin%20DSL-green)](https://gradle.org/)
-[![License](https://img.shields.io/badge/License-GPLv3-red)](LICENSE)
-[![Modrinth](https://img.shields.io/badge/Источник-Modrinth-purple)](https://modrinth.com/)
-[![GitHub](https://img.shields.io/badge/Источник-GitHub-black)](https://github.com/)
+**Автоматическое обновление плагинов для Paper-серверов из Modrinth и GitHub.**
 
-**Автоматическое обновление плагинов для Paper-серверов из Modrinth и GitHub**
-
-[English](README.md) | [Конфигурация](docs/configuration.md) | [Безопасность](docs/security.md) | [Архитектура](docs/architecture.md) | [Планы](docs/roadmap.md)
+[English](README.md) · Русский
 
 </div>
 
----
-
 ## Как это работает
 
-Hanafubuki Plugin Updater проверяет настроенные плагины на наличие новых версий в Modrinth и GitHub, безопасно скачивает обновления в папку Bukkit update и уведомляет операторов о необходимости перезагрузки.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Админ запускает /updateplugins                            │
-├─────────────────────────────────────────────────────────────┤
-│ 2. Для каждого настроенного плагина:                         │
-│    ├─ Modrinth: Вычислить SHA-512 установленного JAR         │
-│    │         → GET /version_file/{hash} → project_id         │
-│    │         → GET /project/{id}/version?loaders=paper       │
-│    │         → Проверить SHA-512 + имя в plugin.yml          │
-│    └─ GitHub:  GET /repos/{owner}/{repo}/releases/latest     │
-│               → Проверить имя в plugin.yml                   │
-├─────────────────────────────────────────────────────────────┤
-│ 3. Если найдена новая версия:                                │
-│    └─ Скачать в plugins/update/{name}.jar.part               │
-│       → Атомарный переход в plugins/update/{name}.jar        │
-├─────────────────────────────────────────────────────────────┤
-│ 4. Рассылка опы: "Plugin X updated, try restarting"         │
-├─────────────────────────────────────────────────────────────┤
-│ 5. При следующей перезагрузке: Paper подменяет JAR сам       │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Основные возможности
-
-| Возможность | Описание |
-|-------------|----------|
-| **Безопасный поиск в Modrinth** | SHA-512 хеш установленного JAR → нет атак через поиск по имени |
-| **Поддержка GitHub Releases** | Формат owner/repo, фильтрация ассетов по шаблону |
-| **Два режима обновления** | Include-only или exclude-list (работает в обоих режимах) |
-| **Фильтрация версий** | Глобальные и по-плагин лимиты min/max версий |
-| **Безопасная установка** | Скачивание в `plugins/update/`, атомарный move, применение при рестарте |
-| **Асинхронные операции** | Весь сетевой I/O в фоне через `CompletableFuture` |
-| **MiniMessage стилизация** | Настраиваемые цвета, градиенты, форматирование |
-| **Уведомления операторов** | Broadcast при успешном обновлении |
+- **Modrinth**: Вычисляет SHA-512 установленного JAR → `GET /version_file/{hash}` → project ID → `GET /project/{id}/version?loaders=paper&game_versions=["1.21.9"]` → проверяет хеш + имя в `plugin.yml`. Никакого поиска по имени, никакого спуфинга.
+- **GitHub**: `GET /repos/{owner}/{repo}/releases/latest` → подбирает ассет по шаблону → проверяет имя в `plugin.yml`.
+- **Безопасная установка**: Скачивает в `plugins/update/{name}.jar.part` → атомарный move в `plugins/update/{name}.jar` → Paper подменяет при следующем рестарте. Никогда не перезаписывает работающие JAR.
+- **Асинхронность**: Весь сетевой I/O уходит в фоновые потоки через `CompletableFuture`.
+- **Уведомления**: Рассылает опы «Plugin X updated, try restarting», когда обновления готовы.
 
 ## Установка
 
 ### Требования
+
 - **Java 21**
-- **Paper 1.21.9** (также работает на форках: Purpur, Pufferfish и др.)
+- **Paper 1.21.9** (также Purpur, Pufferfish, Folia)
 - Совместим с Geyser/Floodgate/ViaVersion
 
 ### Установка
+
 1. Скачайте последний `.jar` из [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
 2. Положите в папку `plugins/` сервера
 3. Запустите/перезапустите сервер
-4. Отредактируйте `plugins/HanafubukiPluginUpdater/config.yml` (создаётся при первом запуске)
+4. Отредактируйте `plugins/HanafubukiPluginUpdater/config.yml` (создаётся при первом запуске из [config.example.yml](docs/config.example.yml))
 5. Выполните `/updateplugins` для проверки обновлений
 
-### Конфигурация
+## Конфигурация
 
-Скопируйте `config.yml` и настройте:
+Конфиг генерируется при первом запуске из встроенного примера.  
+Полный прокомментированный справочник — [docs/config.example.yml](docs/config.example.yml).
+
+**Основные секции:**
 
 ```yaml
 global:
@@ -84,12 +49,33 @@ modes:
   exclude_list: []             # плагины для пропуска (в обоих режимах)
   include_list: []             # плагины для обновления (режим include_only)
 
+modrinth:
+  # timeout: 10
+  # download_timeout: 60
+  # loaders: ["paper"]
+  # game_versions: ["1.21.9"]
+
+github:
+  # timeout: 10
+  # download_timeout: 60
+  # token: "ghp_..."           # опционально, повышает лимит запросов
+  # default_branch: "main"
+
+console:
+  mini_message: true
+  colors:
+    info: "<green>"
+    warning: "<yellow><bold>"
+    error: "<red><italic>"
+    success: "<aqua><bold>"
+    header: "<gradient:gold:yellow>"
+
 plugins:
   "WorldEdit":
     source: "modrinth"
     version: "7.3.12"
     # project_id: "worldedit"  # опционально: явный ID/slug Modrinth
-  
+
   "Paper":
     source: "github"
     version: "1.21.9-R0.1"
@@ -97,30 +83,35 @@ plugins:
     # asset_pattern: "paper-*.jar"
 ```
 
-Полная схема в [Справочнике конфигурации](docs/configuration.md).
+### Поля записи плагина
+
+| Поле | Modrinth | GitHub | Описание |
+|------|:--------:|:------:|----------|
+| `source` | ✓ обязательно | ✓ обязательно | `"modrinth"` или `"github"` |
+| `version` | ✓ обязательно | ✓ обязательно | Текущая установленная версия (для сравнения) |
+| `project_id` | опционально | — | ID/slug проекта Modrinth (переопределяет поиск по хешу) |
+| `repo` | — | ✓ обязательно | GitHub `owner/repo` |
+| `asset_pattern` | — | опционально | Глоб-шаблон ассета релиза (например, `paper-*.jar`) |
+| `min_version` | опционально | опционально | Переопределение глобального минимума |
+| `max_version` | опционально | опционально | Переопределение глобального максимума |
 
 ## Команды
 
 | Команда | Право | Описание |
 |---------|-------|----------|
-| `/updateplugins` | `hanafubuki.updater.update` | Проверить и скачать обновления плагинов |
-| `/updateplugins reload` | `hanafubuki.updater.update` | Перезагрузить конфигурацию (планируется) |
-| `/updateplugins --dry-run` | `hanafubuki.updater.update` | Предпросмотр обновлений без скачивания (планируется) |
+| `/updateplugins` | `hanafubuki.updater.update` (OP) | Проверить и скачать обновления плагинов |
+| `/updateplugins reload` | `hanafubuki.updater.update` (OP) | Перезагрузить конфигурацию (планируется) |
+| `/updateplugins --dry-run` | `hanafubuki.updater.update` (OP) | Предпросмотр обновлений без скачивания (планируется) |
 
 По умолчанию: **только для OP**
 
 ## Релизы
 
-Сборка и публикация через GitHub Actions при изменении версии:
+Поднимаешь `version=` в [`gradle.properties`](gradle.properties) и пушишь в `master`.  
+GitHub Actions собирает, подписывает и публикует в Releases.
 
-1. Обновите `version=` в `gradle.properties`
-2. `git commit -am "Release vX.Y.Z"`
-3. `git tag vX.Y.Z`
-4. `git push origin master --tags`
-5. GitHub Actions собирает, подписывает и публикует в Releases
-
-### Локальная сборка (для разработки)
 ```bash
+# Локальная сборка (для разработки)
 ./gradlew build
 # Результат: build/libs/hanafubuki-plugin-updater-<version>.jar
 ```
@@ -131,7 +122,7 @@ plugins:
 - **Paper API** 1.21.9 (compileOnly)
 - **Gson** для парсинга JSON
 - **SnakeYAML** для конфига (через Bukkit)
-- **Modrinth API v2** (labrinth)
+- **Modrinth API v2** (https://api.modrinth.com/v2)
 - **GitHub REST API v3**
 
 ## Безопасность

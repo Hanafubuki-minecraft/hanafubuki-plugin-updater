@@ -35,6 +35,9 @@ public class GitHubSourceHandler {
     private final String githubToken;
     private final Logger logger;
     private final ExecutorService executorService;
+    private final int apiTimeoutSeconds;
+    private final int downloadTimeoutSeconds;
+    private final String updateFolderName;
     
     /**
      * Constructor for GitHubSourceHandler
@@ -43,8 +46,11 @@ public class GitHubSourceHandler {
      * @param pluginVersion The version of the updater plugin
      * @param logger The logger to use for output
      * @param executorService The executor service to use for async operations
+     * @param apiTimeoutSeconds API request timeout in seconds
+     * @param downloadTimeoutSeconds Download timeout in seconds
+     * @param updateFolderName The name of the update folder (from bukkit.yml settings.update-folder)
      */
-    public GitHubSourceHandler(HttpClient httpClient, String githubToken, String pluginVersion, Logger logger, ExecutorService executorService) {
+    public GitHubSourceHandler(HttpClient httpClient, String githubToken, String pluginVersion, Logger logger, ExecutorService executorService, int apiTimeoutSeconds, int downloadTimeoutSeconds, String updateFolderName) {
         this.httpClient = httpClient;
         this.baseUrl = "https://api.github.com";
         this.gson = new Gson();
@@ -52,6 +58,9 @@ public class GitHubSourceHandler {
         this.githubToken = githubToken;
         this.logger = logger;
         this.executorService = executorService;
+        this.apiTimeoutSeconds = apiTimeoutSeconds;
+        this.downloadTimeoutSeconds = downloadTimeoutSeconds;
+        this.updateFolderName = updateFolderName != null ? updateFolderName : "update";
     }
     
     /**
@@ -80,7 +89,7 @@ public class GitHubSourceHandler {
             
             // Get the latest release
             String releasesUrl = baseUrl + "/repos/" + owner + "/" + repoName + "/releases/latest";
-            HttpRequest request = buildRequest(releasesUrl);
+            HttpRequest request = buildRequest(releasesUrl, false);
             
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             
@@ -93,7 +102,7 @@ public class GitHubSourceHandler {
                 // If no releases exist, try getting the default branch version
                 String defaultBranch = (String) pluginDetails.getOrDefault("default_branch", "main");
                 String branchUrl = baseUrl + "/repos/" + owner + "/" + repoName + "/branches/" + defaultBranch;
-                HttpRequest branchRequest = buildRequest(branchUrl);
+                HttpRequest branchRequest = buildRequest(branchUrl, false);
                 
                 HttpResponse<String> branchResponse = httpClient.send(branchRequest, HttpResponse.BodyHandlers.ofString());
                 
@@ -138,7 +147,7 @@ public class GitHubSourceHandler {
             
             // Get the release for this version
             String releasesUrl = baseUrl + "/repos/" + owner + "/" + repoName + "/releases/tags/" + version;
-            HttpRequest request = buildRequest(releasesUrl);
+            HttpRequest request = buildRequest(releasesUrl, false);
             
             HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
             
@@ -166,7 +175,7 @@ public class GitHubSourceHandler {
             } else if (response.statusCode() == 404) {
                 // If no specific release exists, try getting the latest release
                 String latestReleaseUrl = baseUrl + "/repos/" + owner + "/" + repoName + "/releases/latest";
-                HttpRequest latestRequest = buildRequest(latestReleaseUrl);
+                HttpRequest latestRequest = buildRequest(latestReleaseUrl, false);
                 
                 HttpResponse<String> latestResponse = httpClient.send(latestRequest, HttpResponse.BodyHandlers.ofString());
                 
@@ -212,7 +221,7 @@ public class GitHubSourceHandler {
         try {
             // Determine target filename (same as installed jar)
             String targetFileName = installedJarPath.getFileName().toString();
-            Path updateDir = installedJarPath.getParent().resolve("update");
+            Path updateDir = installedJarPath.getParent().resolve(updateFolderName);
             Files.createDirectories(updateDir);
             
             Path tempFile = updateDir.resolve(targetFileName + ".part");
@@ -221,7 +230,7 @@ public class GitHubSourceHandler {
             // Download the file
             logger.info("Downloading " + pluginName + " from: " + downloadUrl);
             
-            HttpRequest request = buildRequest(downloadUrl);
+            HttpRequest request = buildRequest(downloadUrl, true);
             
             HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(tempFile));
             
@@ -249,11 +258,13 @@ public class GitHubSourceHandler {
     
     /**
      * Build HTTP request with headers
+     * @param url The URL to request
+     * @param isDownload Whether this is a download request (uses download timeout)
      */
-    private HttpRequest buildRequest(String url) {
+    private HttpRequest buildRequest(String url, boolean isDownload) {
         HttpRequest.Builder builder = HttpRequest.newBuilder()
                 .uri(URI.create(url))
-                .timeout(Duration.ofSeconds(10))
+                .timeout(Duration.ofSeconds(isDownload ? downloadTimeoutSeconds : apiTimeoutSeconds))
                 .header("Accept", "application/json")
                 .header("User-Agent", userAgent);
         

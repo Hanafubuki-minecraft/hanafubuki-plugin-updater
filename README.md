@@ -1,78 +1,43 @@
-<div align="center">
-
 # Hanafubuki Plugin Updater
 
-[![Paper](https://img.shields.io/badge/Paper-1.21.9-blue)](https://papermc.io/)
-[![Java](https://img.shields.io/badge/Java-21-orange)](https://adoptium.net/)
-[![Gradle](https://img.shields.io/badge/Gradle-Kotlin%20DSL-green)](https://gradle.org/)
-[![License](https://img.shields.io/badge/License-GPLv3-red)](LICENSE)
-[![Modrinth](https://img.shields.io/badge/Source-Modrinth-purple)](https://modrinth.com/)
-[![GitHub](https://img.shields.io/badge/Source-GitHub-black)](https://github.com/)
+[![Build](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/actions/workflows/release.yml/badge.svg)](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/actions/workflows/release.yml)
+[![Release](https://img.shields.io/github/v/release/Hanafubuki-minecraft/hanafubuki-plugin-updater)](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
+[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-red)](LICENSE)
 
-**Automatic plugin updates for Paper servers from Modrinth and GitHub**
+**Automatic plugin updates for Paper servers from Modrinth and GitHub.**
 
-[Русский](README.ru.md) | [Configuration](docs/configuration.md) | [Security](docs/security.md) | [Architecture](docs/architecture.md) | [Roadmap](docs/roadmap.md)
+English · [Русский](README.ru.md)
 
-</div>
+## How it works
 
----
-
-## How it Works
-
-Hanafubuki Plugin Updater checks your configured plugins against Modrinth and GitHub for newer versions, downloads updates safely to the Bukkit update folder, and notifies operators to restart.
-
-```
-┌─────────────────────────────────────────────────────────────┐
-│ 1. Admin runs /updateplugins                                 │
-├─────────────────────────────────────────────────────────────┤
-│ 2. For each configured plugin:                               │
-│    ├─ Modrinth: Compute SHA-512 of installed JAR             │
-│    │         → GET /version_file/{hash} → project_id         │
-│    │         → GET /project/{id}/version?loaders=paper       │
-│    │         → Verify SHA-512 + plugin.yml name              │
-│    └─ GitHub:  GET /repos/{owner}/{repo}/releases/latest     │
-│               → Verify plugin.yml name                       │
-├─────────────────────────────────────────────────────────────┤
-│ 3. If newer version found:                                   │
-│    └─ Download to plugins/update/{name}.jar.part             │
-│       → Atomic move to plugins/update/{name}.jar             │
-├─────────────────────────────────────────────────────────────┤
-│ 4. Broadcast to ops: "Plugin X updated, try restarting"     │
-├─────────────────────────────────────────────────────────────┤
-│ 5. On next restart: Paper swaps JAR automatically            │
-└─────────────────────────────────────────────────────────────┘
-```
-
-## Key Features
-
-| Feature | Description |
-|---------|-------------|
-| **Secure Modrinth lookup** | SHA-512 hash of installed JAR → no search-by-name attacks |
-| **GitHub releases support** | Owner/repo format, asset pattern matching |
-| **Dual update modes** | Include-only or exclude-list (works in both modes) |
-| **Version filtering** | Global and per-plugin min/max version constraints |
-| **Safe installation** | Downloads to `plugins/update/`, atomic move, restart to apply |
-| **Async operations** | All network I/O off main thread via `CompletableFuture` |
-| **MiniMessage styling** | Configurable colors, gradients, formatting |
-| **Operator notifications** | Broadcast on successful update |
+- **Modrinth**: Computes SHA-512 of the installed JAR → `GET /version_file/{hash}` → project ID → `GET /project/{id}/version?loaders=paper&game_versions=["1.21.9"]` → verifies hash + `plugin.yml` name. No search-by-name, no spoofing.
+- **GitHub**: `GET /repos/{owner}/{repo}/releases/latest` → matches asset by pattern → verifies `plugin.yml` name.
+- **Safe install**: Downloads to `plugins/update/{name}.jar.part` → atomic move to `plugins/update/{name}.jar` → Paper swaps on next restart. Never overwrites running JARs.
+- **Async**: All network I/O runs off the main thread via `CompletableFuture`.
+- **Notify ops**: Broadcasts "Plugin X updated, try restarting" when updates are ready.
 
 ## Setup
 
 ### Requirements
+
 - **Java 21**
-- **Paper 1.21.9** (also works on forks: Purpur, Pufferfish, etc.)
-- Geyser/Floodgate/ViaVersion compatible
+- **Paper 1.21.9** (also works on Purpur, Pufferfish, Folia)
+- Compatible with Geyser/Floodgate/ViaVersion
 
 ### Installation
+
 1. Download the latest `.jar` from [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
 2. Drop it into your server's `plugins/` folder
 3. Start/restart the server
-4. Edit `plugins/HanafubukiPluginUpdater/config.yml` (generated on first run)
+4. Edit `plugins/HanafubukiPluginUpdater/config.yml` (generated on first run from [config.example.yml](docs/config.example.yml))
 5. Run `/updateplugins` to check for updates
 
-### Configuration
+## Configuration
 
-Copy `config.yml` and customize:
+The config is generated on first run from the built-in example.  
+See [docs/config.example.yml](docs/config.example.yml) for the full commented reference.
+
+**Key sections:**
 
 ```yaml
 global:
@@ -81,15 +46,36 @@ global:
 
 modes:
   include_only: false          # true = only update plugins in include_list
-  exclude_list: []             # plugins to skip (both modes)
-  include_list: []             # plugins to update (include_only mode)
+  exclude_list: []             # plugins to skip (works in both modes)
+  include_list: []             # plugins to update (when include_only: true)
+
+modrinth:
+  # timeout: 10
+  # download_timeout: 60
+  # loaders: ["paper"]
+  # game_versions: ["1.21.9"]
+
+github:
+  # timeout: 10
+  # download_timeout: 60
+  # token: "ghp_..."           # optional, increases rate limit
+  # default_branch: "main"
+
+console:
+  mini_message: true
+  colors:
+    info: "<green>"
+    warning: "<yellow><bold>"
+    error: "<red><italic>"
+    success: "<aqua><bold>"
+    header: "<gradient:gold:yellow>"
 
 plugins:
   "WorldEdit":
     source: "modrinth"
     version: "7.3.12"
     # project_id: "worldedit"  # optional: explicit Modrinth ID/slug
-  
+
   "Paper":
     source: "github"
     version: "1.21.9-R0.1"
@@ -97,30 +83,35 @@ plugins:
     # asset_pattern: "paper-*.jar"
 ```
 
-See [Configuration Reference](docs/configuration.md) for full schema.
+### Plugin entry fields
+
+| Field | Modrinth | GitHub | Description |
+|-------|:--------:|:------:|-------------|
+| `source` | ✓ required | ✓ required | `"modrinth"` or `"github"` |
+| `version` | ✓ required | ✓ required | Current installed version (for comparison) |
+| `project_id` | optional | — | Modrinth project ID/slug (overrides hash lookup) |
+| `repo` | — | ✓ required | GitHub `owner/repo` |
+| `asset_pattern` | — | optional | Glob pattern for release asset (e.g. `paper-*.jar`) |
+| `min_version` | optional | optional | Override global minimum |
+| `max_version` | optional | optional | Override global maximum |
 
 ## Commands
 
 | Command | Permission | Description |
 |---------|------------|-------------|
-| `/updateplugins` | `hanafubuki.updater.update` | Check and download plugin updates |
-| `/updateplugins reload` | `hanafubuki.updater.update` | Reload configuration (planned) |
-| `/updateplugins --dry-run` | `hanafubuki.updater.update` | Preview updates without downloading (planned) |
+| `/updateplugins` | `hanafubuki.updater.update` (OP) | Check and download plugin updates |
+| `/updateplugins reload` | `hanafubuki.updater.update` (OP) | Reload configuration (planned) |
+| `/updateplugins --dry-run` | `hanafubuki.updater.update` (OP) | Preview updates without downloading (planned) |
 
-Default permission: **OP only**
+Default: **OP only**
 
 ## Releasing
 
-Built and published via GitHub Actions on version bump:
+Bump `version=` in [`gradle.properties`](gradle.properties) and push to `master`.  
+GitHub Actions builds, signs, and publishes to Releases.
 
-1. Update `version=` in `gradle.properties`
-2. `git commit -am "Release vX.Y.Z"`
-3. `git tag vX.Y.Z`
-4. `git push origin master --tags`
-5. GitHub Actions builds, signs, and publishes to Releases
-
-### Local Build (for development)
 ```bash
+# Local build (for development)
 ./gradlew build
 # Output: build/libs/hanafubuki-plugin-updater-<version>.jar
 ```
@@ -131,7 +122,7 @@ Built and published via GitHub Actions on version bump:
 - **Paper API** 1.21.9 (compileOnly)
 - **Gson** for JSON parsing
 - **SnakeYAML** for config (via Bukkit)
-- **Modrinth API v2** (labrinth)
+- **Modrinth API v2** (https://api.modrinth.com/v2)
 - **GitHub REST API v3**
 
 ## Security
