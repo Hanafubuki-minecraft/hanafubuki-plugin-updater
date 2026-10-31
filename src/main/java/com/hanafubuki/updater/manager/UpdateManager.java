@@ -114,7 +114,13 @@ public final class UpdateManager {
         run.cancelled.set(true);
         ExecutorService workers = run.workers;
         if (workers != null) {
-            workers.shutdownNow();
+            // shutdownNow() drops queued tasks without completing their futures; cancel them,
+            // otherwise the coordinator waits for them forever.
+            for (Runnable queued : workers.shutdownNow()) {
+                if (queued instanceof Future<?> future) {
+                    future.cancel(false);
+                }
+            }
         }
         return true;
     }
@@ -152,17 +158,25 @@ public final class UpdateManager {
         }
         CompletableFuture<UpdateReport> result = new CompletableFuture<>();
         Thread coordinator = new Thread(() -> {
+            UpdateReport report = null;
+            Throwable failure = null;
             try {
-                result.complete(execute(run, settings, caseInsensitive(installed), updateFolder, mcVersion, options));
+                report = execute(run, settings, caseInsensitive(installed), updateFolder, mcVersion, options);
             } catch (Throwable t) {
                 logger.log(Level.SEVERE, "Update run failed", t);
-                result.completeExceptionally(t);
+                failure = t;
             } finally {
                 ExecutorService w = run.workers;
                 if (w != null) {
                     w.shutdownNow();
                 }
                 active.compareAndSet(run, null);
+            }
+            // Completed only after the run is released, so code reacting to the result can start the next run.
+            if (failure != null) {
+                result.completeExceptionally(failure);
+            } else {
+                result.complete(report);
             }
         }, "HanafubukiUpdater-run");
         coordinator.setDaemon(true);

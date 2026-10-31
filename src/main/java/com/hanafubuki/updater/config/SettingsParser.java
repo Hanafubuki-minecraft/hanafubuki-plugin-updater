@@ -349,6 +349,7 @@ public final class SettingsParser {
         return s.isEmpty() ? def : s;
     }
 
+
     /** A secret: plain value or ${ENV_VAR}. */
     private String secret(String path) {
         String raw = string(path, null);
