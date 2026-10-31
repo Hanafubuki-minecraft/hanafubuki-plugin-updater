@@ -21,17 +21,17 @@ Run `/updateplugins` — new versions are downloaded into `plugins/update/`, and
 
 ## Features
 
-- 🟢 **Modrinth first** — the installed jar is identified by its SHA-512 hash, not by searching names, so a look-alike project can't sneak in
-- 🐙 **GitHub releases** — latest release, asset picked by a glob pattern (`plugin-*.jar`)
-- 📦 **More sources** — [Hangar](https://hangar.papermc.io), SpigotMC (via Spiget), a local / network folder, or any JSON REST API with JSONPath
-- 🛡️ **Safe install** — downloads to `plugins/update/<same name>.jar.part`, checks the hash and the `name` in `plugin.yml`, then moves it atomically. Running jars are never overwritten
-- ⚡ **Fully async** — all network I/O runs off the main thread, plugins are checked in parallel; retries with backoff on failures
-- 🎯 **Version filters** — global `min_version` / `max_version`, overridable per plugin; Modrinth is filtered by loader and game version
-- 📋 **Two modes** — update only `include_list`, or everything except `exclude_list` (exclusions work in both)
-- 🔍 **Auto-discovery** — finds installed plugins missing from the config and adds them for you
-- 🧪 **Dry run** — see what would be updated without downloading anything
-- 📢 **Ops get notified** — "Plugin X updated, try restarting" once an update is queued
-- 📊 **Observability** — `/updateplugins metrics` (also Prometheus format), optional JSON log lines and an HTTP `/health` endpoint
+- **Modrinth first** — the installed jar is identified by its SHA-512 hash, not by searching names, so a look-alike project can't sneak in
+- **GitHub releases** — latest release, asset picked by a glob pattern (`plugin-*.jar`)
+- **More sources** — [Hangar](https://hangar.papermc.io), SpigotMC (via Spiget), a local / network folder, or any JSON REST API with JSONPath
+- **Safe install** — downloads to `plugins/update/<same name>.jar.part`, checks the hash and the `name` in `plugin.yml`, then moves it atomically. Running jars are never overwritten
+- **Fully async** — all network I/O runs off the main thread, plugins are checked in parallel; retries with backoff on failures
+- **Version filters** — global `min_version` / `max_version`, overridable per plugin; Modrinth is filtered by loader and game version
+- **Two modes** — update only `include_list`, or everything except `exclude_list` (exclusions work in both)
+- **Auto-discovery** — finds installed plugins missing from the config and adds them for you
+- **Dry run** — see what would be updated without downloading anything
+- **Ops get notified** — "Plugin X updated, try restarting" once an update is queued
+- **Observability** — `/updateplugins metrics` (also Prometheus format), optional JSON log lines and an HTTP `/health` endpoint
 
 ## Installation
 
