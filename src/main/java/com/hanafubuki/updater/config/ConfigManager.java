@@ -212,6 +212,58 @@ public class ConfigManager {
     }
 
     /**
+     * Check if auto-update of config.yml is enabled
+     * @return true if config should be updated after successful plugin update
+     */
+    public boolean getAutoUpdateConfig() {
+        return yaml.getBoolean("global.auto_update_config", true);
+    }
+
+    /**
+     * Check if auto-discovery of plugins is enabled
+     * @return true if auto-discovery is enabled, false otherwise
+     */
+    public boolean getAutoDiscover() {
+        return yaml.getBoolean("global.auto_discover", false);
+    }
+
+    /**
+     * Update the version of a plugin in config.yml
+     * @param pluginName Name of the plugin
+     * @param newVersion New version string
+     * @return true if updated successfully
+     */
+    public boolean updatePluginVersion(String pluginName, String newVersion) {
+        try {
+            ConfigurationSection pluginsSection = yaml.getConfigurationSection("plugins");
+            if (pluginsSection == null) {
+                return false;
+            }
+            
+            ConfigurationSection pluginSection = pluginsSection.getConfigurationSection(pluginName);
+            if (pluginSection == null) {
+                return false;
+            }
+            
+            pluginSection.set("version", newVersion);
+            
+            // Save to file
+            File configFile = new File(plugin.getDataFolder(), "config.yml");
+            yaml.save(configFile);
+            
+            if (plugin != null) {
+                plugin.getLogger().info("Updated config.yml: " + pluginName + " version -> " + newVersion);
+            }
+            return true;
+        } catch (IOException e) {
+            if (plugin != null) {
+                plugin.getLogger().severe("Failed to update config.yml for " + pluginName + ": " + e.getMessage());
+            }
+            return false;
+        }
+    }
+
+    /**
      * Validate plugin configuration
      * @param pluginName Name of the plugin
      * @param pluginDetails Plugin configuration map
@@ -256,4 +308,174 @@ public class ConfigManager {
         
         return true;
     }
+
+    /**
+     * Get all configured plugin names
+     * @return Set of configured plugin names
+     */
+    public Set<String> getConfiguredPluginNames() {
+        ConfigurationSection section = yaml.getConfigurationSection("plugins");
+        return section != null ? section.getKeys(false) : Collections.emptySet();
+    }
+
+    /**
+     * Discover installed plugins that are not in config
+     * @return List of DiscoveredPlugin objects for plugins not in config
+     */
+    public List<DiscoveredPlugin> discoverUnknownPlugins() {
+        List<DiscoveredPlugin> discovered = new ArrayList<>();
+        
+        if (plugin == null) {
+            return discovered;
+        }
+        
+        Set<String> configuredPlugins = getConfiguredPluginNames();
+        Logger logger = plugin.getLogger();
+        
+        for (org.bukkit.plugin.Plugin loadedPlugin : org.bukkit.Bukkit.getPluginManager().getPlugins()) {
+            String pluginName = loadedPlugin.getName();
+            
+            // Skip if already configured
+            if (configuredPlugins.contains(pluginName)) {
+                continue;
+            }
+            
+            // Skip self
+            if (pluginName.equals(plugin.getName())) {
+                continue;
+            }
+            
+            try {
+                String version = loadedPlugin.getPluginMeta().getVersion();
+                File jarFile = getPluginJarFile(loadedPlugin);
+                String source = detectPluginSource(jarFile, pluginName);
+                
+                discovered.add(new DiscoveredPlugin(pluginName, version, source, jarFile));
+                logger.info("Discovered unknown plugin: " + pluginName + " v" + version + " (source: " + source + ")");
+            } catch (Exception e) {
+                logger.warning("Failed to discover plugin " + pluginName + ": " + e.getMessage());
+            }
+        }
+        
+        return discovered;
+    }
+
+    /**
+     * Get the JAR file for a plugin using reflection
+     */
+    private File getPluginJarFile(org.bukkit.plugin.Plugin loadedPlugin) {
+        try {
+            java.net.URL location = loadedPlugin.getClass().getProtectionDomain().getCodeSource().getLocation();
+            if (location != null) {
+                return new File(location.toURI());
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+
+    /**
+     * Detect plugin source from plugin.yml in JAR
+     * Checks for modrinth/github metadata or defaults to modrinth
+     */
+    private String detectPluginSource(File jarFile, String pluginName) {
+        if (jarFile == null || !jarFile.exists()) {
+            return "modrinth"; // Default
+        }
+        
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
+            var entry = jar.getEntry("plugin.yml");
+            if (entry != null) {
+                try (var is = jar.getInputStream(entry);
+                     var reader = new java.io.InputStreamReader(is)) {
+                    var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
+                    
+                    // Check for explicit source metadata
+                    String source = yaml.getString("source");
+                    if (source != null) {
+                        String lower = source.toLowerCase();
+                        if ("modrinth".equals(lower) || "github".equals(lower)) {
+                            return lower;
+                        }
+                    }
+                    
+                    // Check for website/URL that might indicate source
+                    String website = yaml.getString("website");
+                    if (website != null) {
+                        if (website.contains("modrinth.com")) {
+                            return "modrinth";
+                        }
+                        if (website.contains("github.com")) {
+                            return "github";
+                        }
+                    }
+                    
+                    // Check for authors with known patterns
+                    List<String> authors = yaml.getStringList("authors");
+                    for (String author : authors) {
+                        if (author.toLowerCase().contains("modrinth")) {
+                            return "modrinth";
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        
+        return "modrinth"; // Default to modrinth
+    }
+
+    /**
+     * Add a discovered plugin to config.yml
+     * @param pluginName Name of the plugin
+     * @param version Current version
+     * @param source Source (modrinth or github)
+     * @param projectId Optional Modrinth project ID
+     * @param repo Optional GitHub repo (owner/repo)
+     * @return true if added successfully
+     */
+    public boolean addDiscoveredPlugin(String pluginName, String version, String source, String projectId, String repo) {
+        try {
+            ConfigurationSection pluginsSection = yaml.getConfigurationSection("plugins");
+            if (pluginsSection == null) {
+                pluginsSection = yaml.createSection("plugins");
+            }
+            
+            ConfigurationSection pluginSection = pluginsSection.createSection(pluginName);
+            pluginSection.set("source", source);
+            pluginSection.set("version", version);
+            
+            if ("modrinth".equals(source) && projectId != null && !projectId.isEmpty()) {
+                pluginSection.set("project_id", projectId);
+            }
+            
+            if ("github".equals(source) && repo != null && !repo.isEmpty()) {
+                pluginSection.set("repo", repo);
+            }
+            
+            // Save to file
+            File configFile = new File(plugin.getDataFolder(), "config.yml");
+            yaml.save(configFile);
+            
+            if (plugin != null) {
+                plugin.getLogger().info("Added discovered plugin to config.yml: " + pluginName);
+            }
+            return true;
+        } catch (IOException e) {
+            if (plugin != null) {
+                plugin.getLogger().severe("Failed to add discovered plugin " + pluginName + ": " + e.getMessage());
+            }
+            return false;
+        }
+    }
+
+    /**
+     * Record for a discovered plugin
+     */
+    public record DiscoveredPlugin(
+        String name,
+        String version,
+        String source,
+        File jarFile
+    ) {}
 }

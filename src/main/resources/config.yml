@@ -12,6 +12,10 @@ global:
   # Maximum version that plugins can be updated to
   # Use "latest" or high version like "99.99.99" for no limit
   max_version: "99.99.99"
+  
+  # Auto-discover installed plugins not in config
+  # When true, discovered plugins can be added via /updateplugins discover
+  auto_discover: false
 
 # ============================================
 # UPDATE MODES

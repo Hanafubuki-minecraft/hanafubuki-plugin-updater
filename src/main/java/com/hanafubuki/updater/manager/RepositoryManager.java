@@ -43,6 +43,7 @@ public class RepositoryManager {
     private final String serverVersion;
     private final ExecutorService executorService;
     private final String updateFolderName;
+    private final ConfigManager configManager;
     
     // Cache for plugin name -> JAR path mapping
     private final Map<String, Path> pluginJarCache = new ConcurrentHashMap<>();
@@ -50,6 +51,7 @@ public class RepositoryManager {
     public RepositoryManager(ExecutorService executorService) {
         this.executorService = executorService;
         this.plugin = com.hanafubuki.updater.PluginUpdater.getPlugin(com.hanafubuki.updater.PluginUpdater.class);
+        this.configManager = new ConfigManager();
         
         // Register listener to invalidate cache on plugin enable/disable
         Bukkit.getPluginManager().registerEvents(new PluginCacheListener(), plugin);
@@ -82,7 +84,6 @@ public class RepositoryManager {
         this.updateFolderName = readUpdateFolderFromBukkitYml();
         
         // Load config manager to get timeout settings
-        ConfigManager configManager = new ConfigManager();
         int modrinthApiTimeout = configManager.getModrinthApiTimeout();
         int modrinthDownloadTimeout = configManager.getModrinthDownloadTimeout();
         int githubApiTimeout = configManager.getGitHubApiTimeout();
@@ -145,6 +146,11 @@ public class RepositoryManager {
                     
                     plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
                     
+                    // Auto-update config.yml if enabled
+                    if (this.configManager.getAutoUpdateConfig()) {
+                        this.configManager.updatePluginVersion(pluginName, latestVersion);
+                    }
+                    
                     // Notify ops about the update
                     notifyOps(pluginName, latestVersion);
                 } else {
@@ -198,6 +204,11 @@ public class RepositoryManager {
                     gitHubHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
                     
                     plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
+                    
+                    // Auto-update config.yml if enabled
+                    if (this.configManager.getAutoUpdateConfig()) {
+                        this.configManager.updatePluginVersion(pluginName, latestVersion);
+                    }
                     
                     // Notify ops about the update
                     notifyOps(pluginName, latestVersion);
