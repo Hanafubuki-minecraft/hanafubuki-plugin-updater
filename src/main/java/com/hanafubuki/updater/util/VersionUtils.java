@@ -23,6 +23,17 @@ public class VersionUtils {
     );
 
     /**
+     * Comparator for version strings using semantic version ordering.
+     * Null versions are treated as older than any non-null version.
+     */
+    public static final Comparator<String> VERSION_COMPARATOR = (v1, v2) -> {
+        if (v1 == null && v2 == null) return 0;
+        if (v1 == null) return -1;
+        if (v2 == null) return 1;
+        return isVersionNewer(v1, v2) ? 1 : (isVersionNewer(v2, v1) ? -1 : 0);
+    };
+
+    /**
      * Check if a new version is newer than the current version.
      * Handles semantic versions with pre-release identifiers like:
      * 1.21.9-R0.1-SNAPSHOT, 1.21.9-beta, 1.21.9-rc1, etc.

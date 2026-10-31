@@ -195,6 +195,98 @@ public class ConfigManager {
     }
     
     /**
+     * Get Hangar configuration
+     * @return Hangar configuration map
+     */
+    public Map<String, Object> getHangarConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("hangar");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Get Hangar API timeout in seconds
+     * @return API timeout (default: 10)
+     */
+    public int getHangarApiTimeout() {
+        return yaml.getInt("hangar.timeout", 10);
+    }
+
+    /**
+     * Get Hangar download timeout in seconds
+     * @return Download timeout (default: 60)
+     */
+    public int getHangarDownloadTimeout() {
+        return yaml.getInt("hangar.download_timeout", 60);
+    }
+
+    /**
+     * Get SpigotMC configuration
+     * @return SpigotMC configuration map
+     */
+    public Map<String, Object> getSpigotMCConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("spigotmc");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Get SpigotMC API timeout in seconds
+     * @return API timeout (default: 10)
+     */
+    public int getSpigotMCApiTimeout() {
+        return yaml.getInt("spigotmc.timeout", 10);
+    }
+
+    /**
+     * Get SpigotMC download timeout in seconds
+     * @return Download timeout (default: 60)
+     */
+    public int getSpigotMCDownloadTimeout() {
+        return yaml.getInt("spigotmc.download_timeout", 60);
+    }
+
+    /**
+     * Get Local file source configuration
+     * @return Local configuration map
+     */
+    public Map<String, Object> getLocalConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("local");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Get Local file source timeout in seconds
+     * @return Timeout (default: 5)
+     */
+    public int getLocalTimeout() {
+        return yaml.getInt("local.timeout", 5);
+    }
+
+    /**
+     * Get Custom HTTP source configuration
+     * @return Custom HTTP configuration map
+     */
+    public Map<String, Object> getCustomHttpConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("custom");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Get Custom HTTP API timeout in seconds
+     * @return API timeout (default: 10)
+     */
+    public int getCustomHttpApiTimeout() {
+        return yaml.getInt("custom.timeout", 10);
+    }
+
+    /**
+     * Get Custom HTTP download timeout in seconds
+     * @return Download timeout (default: 60)
+     */
+    public int getCustomHttpDownloadTimeout() {
+        return yaml.getInt("custom.download_timeout", 60);
+    }
+
+    /**
      * Get console output settings
      * @return Console configuration map
      */
@@ -374,24 +466,25 @@ public class ConfigManager {
         // Check source field
         Object sourceObj = pluginDetails.get("source");
         if (sourceObj == null) {
-            logger.severe("Plugin '" + pluginName + "' is missing required field 'source' (must be 'modrinth' or 'github')");
+            logger.severe("Plugin '" + pluginName + "' is missing required field 'source' (must be 'modrinth', 'github', 'hangar', 'spigotmc', 'local', or 'custom')");
             return false;
         }
         String source = sourceObj.toString().toLowerCase();
         
-        if (!"modrinth".equals(source) && !"github".equals(source)) {
-            logger.severe("Plugin '" + pluginName + "' has invalid source: '" + source + "' (must be 'modrinth' or 'github')");
+        if (!"modrinth".equals(source) && !"github".equals(source) && !"hangar".equals(source) && 
+            !"spigotmc".equals(source) && !"local".equals(source) && !"custom".equals(source)) {
+            logger.severe("Plugin '" + pluginName + "' has invalid source: '" + source + "' (must be 'modrinth', 'github', 'hangar', 'spigotmc', 'local', or 'custom')");
             return false;
         }
         
-        // Check version field (required for both sources)
+        // Check version field (required for all sources)
         Object versionObj = pluginDetails.get("version");
         if (versionObj == null || versionObj.toString().trim().isEmpty()) {
             logger.severe("Plugin '" + pluginName + "' is missing required field 'version' (non-empty string)");
             return false;
         }
         
-        // GitHub-specific validation: repo field required
+        // Source-specific validation
         if ("github".equals(source)) {
             Object repoObj = pluginDetails.get("repo");
             if (repoObj == null || repoObj.toString().trim().isEmpty()) {
@@ -401,6 +494,45 @@ public class ConfigManager {
             String repo = repoObj.toString().trim();
             if (!repo.contains("/")) {
                 logger.severe("Plugin '" + pluginName + "' (github source) has invalid repo format: '" + repo + "' (must be owner/repo)");
+                return false;
+            }
+        } else if ("hangar".equals(source)) {
+            Object projectSlugObj = pluginDetails.get("project_slug");
+            if (projectSlugObj == null || projectSlugObj.toString().trim().isEmpty()) {
+                logger.severe("Plugin '" + pluginName + "' (hangar source) is missing required field 'project_slug' (format: owner/slug)");
+                return false;
+            }
+            String projectSlug = projectSlugObj.toString().trim();
+            if (!projectSlug.contains("/")) {
+                logger.severe("Plugin '" + pluginName + "' (hangar source) has invalid project_slug format: '" + projectSlug + "' (must be owner/slug)");
+                return false;
+            }
+        } else if ("spigotmc".equals(source)) {
+            Object resourceIdObj = pluginDetails.get("resource_id");
+            Object resourceNameObj = pluginDetails.get("resource_name");
+            if ((resourceIdObj == null || resourceIdObj.toString().trim().isEmpty()) &&
+                (resourceNameObj == null || resourceNameObj.toString().trim().isEmpty())) {
+                logger.severe("Plugin '" + pluginName + "' (spigotmc source) requires either 'resource_id' (numeric) or 'resource_name'");
+                return false;
+            }
+            if (resourceIdObj != null) {
+                try {
+                    Integer.parseInt(resourceIdObj.toString().trim());
+                } catch (NumberFormatException e) {
+                    logger.severe("Plugin '" + pluginName + "' (spigotmc source) has invalid 'resource_id': must be numeric");
+                    return false;
+                }
+            }
+        } else if ("local".equals(source)) {
+            Object pathObj = pluginDetails.get("path");
+            if (pathObj == null || pathObj.toString().trim().isEmpty()) {
+                logger.severe("Plugin '" + pluginName + "' (local source) is missing required field 'path' (directory or file path)");
+                return false;
+            }
+        } else if ("custom".equals(source)) {
+            Object urlObj = pluginDetails.get("url");
+            if (urlObj == null || urlObj.toString().trim().isEmpty()) {
+                logger.severe("Plugin '" + pluginName + "' (custom source) is missing required field 'url' (REST endpoint)");
                 return false;
             }
         }

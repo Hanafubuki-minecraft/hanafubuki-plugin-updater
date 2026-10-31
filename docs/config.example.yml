@@ -104,6 +104,52 @@ github:
     max_delay_ms: 10000
 
 # ============================================
+# HANGAR SETTINGS (PaperMC official plugin repository)
+# ============================================
+hangar:
+  # Custom User-Agent (optional, defaults to plugin name/version)
+  # user_agent: "MyServer/Updater/1.0"
+  
+  # API request timeout in seconds (default: 10)
+  # timeout: 10
+  
+  # Download timeout in seconds (default: 60)
+  # download_timeout: 60
+
+# ============================================
+# SPIGOTMC SETTINGS (via Spiget API)
+# ============================================
+spigotmc:
+  # Custom User-Agent (optional, defaults to plugin name/version)
+  # user_agent: "MyServer/Updater/1.0"
+  
+  # API request timeout in seconds (default: 10)
+  # timeout: 10
+  
+  # Download timeout in seconds (default: 60)
+  # download_timeout: 60
+
+# ============================================
+# LOCAL FILE SOURCE SETTINGS
+# ============================================
+local:
+  # Timeout for file operations in seconds (default: 5)
+  # timeout: 5
+
+# ============================================
+# CUSTOM HTTP SOURCE SETTINGS
+# ============================================
+custom:
+  # Custom User-Agent (optional, defaults to plugin name/version)
+  # user_agent: "MyServer/Updater/1.0"
+  
+  # API request timeout in seconds (default: 10)
+  # timeout: 10
+  
+  # Download timeout in seconds (default: 60)
+  # download_timeout: 60
+
+# ============================================
 # CONSOLE OUTPUT SETTINGS
 # ============================================
 console:
@@ -204,6 +250,115 @@ plugins:
     # asset_pattern: "ProtocolLib.jar"
 
   # ============================================
+  # HANGAR PLUGINS (PaperMC official plugin repository)
+  # ============================================
+  # For Hangar plugins, 'source', 'version', and 'project_slug' are required.
+  # 'project_slug' must be in 'owner/slug' format (e.g., "EngineHub/WorldEdit").
+  # The plugin filters by Paper platform and server version automatically.
+  # SHA-256 checksums are verified from the API.
+  
+  # Example: WorldEdit (Hangar)
+  "WorldEdit-Hangar":
+    source: "hangar"
+    version: "7.4.5"
+    project_slug: "EngineHub/WorldEdit"
+    # min_version: "7.0.0"    # Optional: override global min
+    # max_version: "7.9.9"    # Optional: override global max
+
+  # Example: LuckPerms (Hangar)
+  "LuckPerms-Hangar":
+    source: "hangar"
+    version: "5.4.120"
+    project_slug: "LuckPerms/LuckPerms"
+
+  # ============================================
+  # SPIGOTMC PLUGINS (via Spiget API)
+  # ============================================
+  # For SpigotMC plugins, 'source', 'version', and either 'resource_id' or 'resource_name' are required.
+  # 'resource_id' is the numeric resource ID from spigotmc.org (e.g., 12345).
+  # 'resource_name' is the resource name for search-based lookup.
+  # Note: Spiget API doesn't provide checksums, so hash verification is skipped.
+  
+  # Example: EssentialsX (SpigotMC - by resource_id)
+  "EssentialsX-Spigot":
+    source: "spigotmc"
+    version: "2.20.1"
+    resource_id: 9089
+    # min_version: "2.0.0"    # Optional: override global min
+    # max_version: "2.99.99"  # Optional: override global max
+
+  # Example: Vault (SpigotMC - by resource_name)
+  "Vault-Spigot":
+    source: "spigotmc"
+    version: "1.7.3"
+    resource_name: "Vault"
+
+  # ============================================
+  # LOCAL FILE SOURCE PLUGINS
+  # ============================================
+  # For local file source, 'source', 'version', and 'path' are required.
+  # 'path' can be a directory (scanned for .jar files) or a direct file path.
+  # Supports local paths, SMB/CIFS shares, NFS mounts.
+  # Optional 'pattern' (regex) to extract version from filename.
+  # Optional 'checksum' (SHA-256) or .sha256/.sha512 sidecar files for verification.
+  
+  # Example: Custom plugin from local directory
+  "MyCustomPlugin-Local":
+    source: "local"
+    version: "1.0.0"
+    path: "/opt/minecraft/plugins/update-source/MyCustomPlugin"
+    # pattern: "MyCustomPlugin-(\\d+\\.\\d+\\.\\d+)\\.jar"  # Optional: extract version from filename
+    # checksum: "a1b2c3d4e5f6..."  # Optional: explicit SHA-256
+
+  # Example: Plugin from network share (SMB/CIFS)
+  "SharedPlugin-Local":
+    source: "local"
+    version: "2.1.0"
+    path: "/mnt/plugins-share/SharedPlugin"
+    # pattern: "SharedPlugin_v(\\d+\\.\\d+\\.\\d+)\\.jar"
+
+  # ============================================
+  # CUSTOM HTTP SOURCE PLUGINS
+  # ============================================
+  # For custom HTTP source, 'source', 'version', and 'url' are required.
+  # 'url' is the REST API endpoint returning JSON.
+  # Optional JSONPath expressions for extracting data:
+  #   - version_path: path to version string (default: tries common fields)
+  #   - download_url_path: path to download URL (default: tries common fields)
+  #   - checksum_path: path to SHA-256 checksum (default: tries common fields)
+  # Optional 'headers' map for custom headers.
+  # Optional 'auth' object for authentication (bearer, basic, api_key).
+  # Optional 'checksum' for explicit expected SHA-256.
+  
+  # Example: Custom REST API with JSONPath
+  "MyPlugin-Custom":
+    source: "custom"
+    version: "1.0.0"
+    url: "https://api.example.com/plugins/myplugin/latest"
+    version_path: "\$.version"
+    download_url_path: "\$.download_url"
+    checksum_path: "\$.sha256"
+    headers:
+      X-Custom-Header: "my-value"
+    auth:
+      type: "bearer"
+      token: "your-api-token-here"
+    # checksum: "a1b2c3d4e5f6..."  # Optional: override checksum from API
+
+  # Example: Custom API with Basic Auth
+  "AnotherPlugin-Custom":
+    source: "custom"
+    version: "2.0.0"
+    url: "https://internal-api.example.com/v1/plugins/anotherplugin"
+    version_path: "\$.latest_version"
+    download_url_path: "\$.assets[0].url"
+    checksum_path: "\$.assets[0].checksum"
+    auth:
+      type: "basic"
+      username: "updater"
+      password: "secret-password"
+
+  # ============================================
   # ADD YOUR PLUGINS BELOW
   # ============================================
   # "YourPluginName":
@@ -216,3 +371,28 @@ plugins:
   #   version: "2.0.0"
   #   repo: "Owner/Repo"
   #   # asset_pattern: "plugin-*.jar"
+  
+  # "HangarPlugin":
+  #   source: "hangar"
+  #   version: "1.0.0"
+  #   project_slug: "Owner/Slug"
+  
+  # "SpigotMCPlugin":
+  #   source: "spigotmc"
+  #   version: "1.0.0"
+  #   resource_id: 12345
+  #   # or: resource_name: "PluginName"
+  
+  # "LocalPlugin":
+  #   source: "local"
+  #   version: "1.0.0"
+  #   path: "/path/to/plugins"
+  #   # pattern: "Plugin-(\\d+\\.\\d+\\.\\d+)\\.jar"
+  
+  # "CustomPlugin":
+  #   source: "custom"
+  #   version: "1.0.0"
+  #   url: "https://api.example.com/plugin/latest"
+  #   version_path: "$.version"
+  #   download_url_path: "$.url"
+  #   checksum_path: "$.sha256"

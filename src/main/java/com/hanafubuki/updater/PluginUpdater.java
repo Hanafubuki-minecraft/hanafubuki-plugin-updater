@@ -489,17 +489,8 @@ public class PluginUpdater extends JavaPlugin {
                     return;
                 }
                 
-                // Determine source (Modrinth or GitHub)
-                String source = (String) pluginDetails.get("source");
-                
                 // Update based on source
-                if ("modrinth".equalsIgnoreCase(source)) {
-                    repositoryManager.updateFromModrinth(pluginName, pluginDetails);
-                } else if ("github".equalsIgnoreCase(source)) {
-                    repositoryManager.updateFromGitHub(pluginName, pluginDetails);
-                } else {
-                    getLogger().warning("Unknown source for " + pluginName + ": " + source);
-                }
+                repositoryManager.updateFromSource(pluginName, pluginDetails);
                 
             } catch (Exception e) {
                 getLogger().severe("Failed to update " + pluginName + ": " + e.getMessage());

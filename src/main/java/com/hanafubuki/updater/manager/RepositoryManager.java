@@ -26,8 +26,13 @@ import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.hanafubuki.updater.config.ConfigManager;
-import com.hanafubuki.updater.source.ModrinthSourceHandler;
 import com.hanafubuki.updater.source.GitHubSourceHandler;
+import com.hanafubuki.updater.source.HangarSourceHandler;
+import com.hanafubuki.updater.source.LocalFileSourceHandler;
+import com.hanafubuki.updater.source.ModrinthSourceHandler;
+import com.hanafubuki.updater.source.SpigotMCSourceHandler;
+import com.hanafubuki.updater.source.SourceHandler;
+import com.hanafubuki.updater.source.CustomHTTPSourceHandler;
 import com.hanafubuki.updater.util.VersionUtils;
 
 import java.util.logging.Logger;
@@ -40,6 +45,10 @@ public class RepositoryManager {
     private final HttpClient httpClient;
     private final ModrinthSourceHandler modrinthHandler;
     private final GitHubSourceHandler gitHubHandler;
+    private final HangarSourceHandler hangarHandler;
+    private final SpigotMCSourceHandler spigotMCHandler;
+    private final LocalFileSourceHandler localFileHandler;
+    private final CustomHTTPSourceHandler customHttpHandler;
     private final JavaPlugin plugin;
     private final String serverVersion;
     private final ExecutorService executorService;
@@ -99,6 +108,13 @@ public class RepositoryManager {
         int modrinthDownloadTimeout = configManager.getModrinthDownloadTimeout();
         int githubApiTimeout = configManager.getGitHubApiTimeout();
         int githubDownloadTimeout = configManager.getGitHubDownloadTimeout();
+        int hangarApiTimeout = configManager.getHangarApiTimeout();
+        int hangarDownloadTimeout = configManager.getHangarDownloadTimeout();
+        int spigotMCApiTimeout = configManager.getSpigotMCApiTimeout();
+        int spigotMCDownloadTimeout = configManager.getSpigotMCDownloadTimeout();
+        int localTimeout = configManager.getLocalTimeout();
+        int customHttpApiTimeout = configManager.getCustomHttpApiTimeout();
+        int customHttpDownloadTimeout = configManager.getCustomHttpDownloadTimeout();
         
         // Get retry settings
         int modrinthMaxRetries = configManager.getModrinthMaxRetries();
@@ -115,6 +131,14 @@ public class RepositoryManager {
         String githubToken = null;
         
         this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger, executorService, githubApiTimeout, githubDownloadTimeout, this.updateFolderName, githubMaxRetries, githubBaseDelayMs, githubMaxDelayMs);
+        
+        this.hangarHandler = new HangarSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService, hangarApiTimeout, hangarDownloadTimeout, this.updateFolderName, modrinthMaxRetries, modrinthBaseDelayMs, modrinthMaxDelayMs);
+        
+        this.spigotMCHandler = new SpigotMCSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService, spigotMCApiTimeout, spigotMCDownloadTimeout, this.updateFolderName, modrinthMaxRetries, modrinthBaseDelayMs, modrinthMaxDelayMs);
+        
+        this.localFileHandler = new LocalFileSourceHandler(logger, this.updateFolderName, localTimeout);
+        
+        this.customHttpHandler = new CustomHTTPSourceHandler(httpClient, pluginVersion, logger, executorService, customHttpApiTimeout, customHttpDownloadTimeout, this.updateFolderName, modrinthMaxRetries, modrinthBaseDelayMs, modrinthMaxDelayMs);
     }
     
     /**
@@ -263,6 +287,320 @@ public class RepositoryManager {
                 e.printStackTrace();
             }
         }, executorService);
+    }
+    
+    /**
+     * Update a plugin from Hangar asynchronously
+     * @param pluginName Name of the plugin to update
+     * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
+     */
+    public CompletableFuture<?> updateFromHangar(String pluginName, Map<String, Object> pluginDetails) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                checksTotal.incrementAndGet();
+                
+                // Find the installed JAR file
+                Path installedJarPath = findInstalledJar(pluginName);
+                if (installedJarPath == null) {
+                    plugin.getLogger().warning("Could not find installed JAR for plugin: " + pluginName);
+                    return;
+                }
+                
+                // Get current version
+                String currentVersion = (String) pluginDetails.get("version");
+                
+                // Check for updates
+                String latestVersion = hangarHandler.getLatestVersion(pluginName, pluginDetails, installedJarPath);
+                
+                if (latestVersion == null) {
+                    plugin.getLogger().info("No compatible version found for " + pluginName + " on Hangar");
+                    return;
+                }
+                
+                if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
+                    updatesFound.incrementAndGet();
+                    plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
+                    
+                    // Get download URL
+                    String downloadUrl = hangarHandler.getDownloadUrl(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    if (downloadUrl == null) {
+                        plugin.getLogger().warning("Could not get download URL for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
+                    
+                    // Get expected SHA-256 for verification
+                    String expectedSha256 = hangarHandler.getExpectedChecksum(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    // Note: Hangar uses SHA-256, but downloadAndInstall will handle verification
+                    
+                    if (dryRun) {
+                        plugin.getLogger().info(String.format("[DRY-RUN] Would update %s: %s -> %s (URL: %s)", 
+                                pluginName, currentVersion, latestVersion, downloadUrl));
+                        return;
+                    }
+                    
+                    // Download and install update
+                    hangarHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
+                    downloadsSuccess.incrementAndGet();
+                    
+                    plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
+                    
+                    // Auto-update config.yml if enabled
+                    if (this.configManager.getAutoUpdateConfig()) {
+                        this.configManager.updatePluginVersion(pluginName, latestVersion);
+                    }
+                    
+                    // Notify ops about the update
+                    notifyOps(pluginName, latestVersion);
+                } else {
+                    plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
+                }
+            } catch (Exception e) {
+                errors.incrementAndGet();
+                plugin.getLogger().severe("Failed to update " + pluginName + " from Hangar: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, executorService);
+    }
+    
+    /**
+     * Update a plugin from SpigotMC asynchronously
+     * @param pluginName Name of the plugin to update
+     * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
+     */
+    public CompletableFuture<?> updateFromSpigotMC(String pluginName, Map<String, Object> pluginDetails) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                checksTotal.incrementAndGet();
+                
+                // Find the installed JAR file
+                Path installedJarPath = findInstalledJar(pluginName);
+                if (installedJarPath == null) {
+                    plugin.getLogger().warning("Could not find installed JAR for plugin: " + pluginName);
+                    return;
+                }
+                
+                // Get current version
+                String currentVersion = (String) pluginDetails.get("version");
+                
+                // Check for updates
+                String latestVersion = spigotMCHandler.getLatestVersion(pluginName, pluginDetails, installedJarPath);
+                
+                if (latestVersion == null) {
+                    plugin.getLogger().info("No compatible version found for " + pluginName + " on SpigotMC");
+                    return;
+                }
+                
+                if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
+                    updatesFound.incrementAndGet();
+                    plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
+                    
+                    // Get download URL
+                    String downloadUrl = spigotMCHandler.getDownloadUrl(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    if (downloadUrl == null) {
+                        plugin.getLogger().warning("Could not get download URL for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
+                    
+                    if (dryRun) {
+                        plugin.getLogger().info(String.format("[DRY-RUN] Would update %s: %s -> %s (URL: %s)", 
+                                pluginName, currentVersion, latestVersion, downloadUrl));
+                        return;
+                    }
+                    
+                    // Download and install update
+                    spigotMCHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
+                    downloadsSuccess.incrementAndGet();
+                    
+                    plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
+                    
+                    // Auto-update config.yml if enabled
+                    if (this.configManager.getAutoUpdateConfig()) {
+                        this.configManager.updatePluginVersion(pluginName, latestVersion);
+                    }
+                    
+                    // Notify ops about the update
+                    notifyOps(pluginName, latestVersion);
+                } else {
+                    plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
+                }
+            } catch (Exception e) {
+                downloadsFailed.incrementAndGet();
+                errors.incrementAndGet();
+                plugin.getLogger().severe("Failed to update " + pluginName + " from SpigotMC: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, executorService);
+    }
+    
+    /**
+     * Update a plugin from Local file source asynchronously
+     * @param pluginName Name of the plugin to update
+     * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
+     */
+    public CompletableFuture<?> updateFromLocal(String pluginName, Map<String, Object> pluginDetails) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                checksTotal.incrementAndGet();
+                
+                // Find the installed JAR file
+                Path installedJarPath = findInstalledJar(pluginName);
+                if (installedJarPath == null) {
+                    plugin.getLogger().warning("Could not find installed JAR for plugin: " + pluginName);
+                    return;
+                }
+                
+                // Get current version
+                String currentVersion = (String) pluginDetails.get("version");
+                
+                // Check for updates
+                String latestVersion = localFileHandler.getLatestVersion(pluginName, pluginDetails, installedJarPath);
+                
+                if (latestVersion == null) {
+                    plugin.getLogger().info("No newer version found for " + pluginName + " in local source");
+                    return;
+                }
+                
+                if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
+                    updatesFound.incrementAndGet();
+                    plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
+                    
+                    // Get download URL
+                    String downloadUrl = localFileHandler.getDownloadUrl(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    if (downloadUrl == null) {
+                        plugin.getLogger().warning("Could not get download URL for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
+                    
+                    if (dryRun) {
+                        plugin.getLogger().info(String.format("[DRY-RUN] Would update %s: %s -> %s (URL: %s)", 
+                                pluginName, currentVersion, latestVersion, downloadUrl));
+                        return;
+                    }
+                    
+                    // Download and install update
+                    localFileHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
+                    downloadsSuccess.incrementAndGet();
+                    
+                    plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
+                    
+                    // Auto-update config.yml if enabled
+                    if (this.configManager.getAutoUpdateConfig()) {
+                        this.configManager.updatePluginVersion(pluginName, latestVersion);
+                    }
+                    
+                    // Notify ops about the update
+                    notifyOps(pluginName, latestVersion);
+                } else {
+                    plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
+                }
+            } catch (Exception e) {
+                downloadsFailed.incrementAndGet();
+                errors.incrementAndGet();
+                plugin.getLogger().severe("Failed to update " + pluginName + " from local source: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, executorService);
+    }
+    
+    /**
+     * Update a plugin from Custom HTTP source asynchronously
+     * @param pluginName Name of the plugin to update
+     * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
+     */
+    public CompletableFuture<?> updateFromCustomHttp(String pluginName, Map<String, Object> pluginDetails) {
+        return CompletableFuture.runAsync(() -> {
+            try {
+                checksTotal.incrementAndGet();
+                
+                // Find the installed JAR file
+                Path installedJarPath = findInstalledJar(pluginName);
+                if (installedJarPath == null) {
+                    plugin.getLogger().warning("Could not find installed JAR for plugin: " + pluginName);
+                    return;
+                }
+                
+                // Get current version
+                String currentVersion = (String) pluginDetails.get("version");
+                
+                // Check for updates
+                String latestVersion = customHttpHandler.getLatestVersion(pluginName, pluginDetails, installedJarPath);
+                
+                if (latestVersion == null) {
+                    plugin.getLogger().info("No version found for " + pluginName + " on custom HTTP source");
+                    return;
+                }
+                
+                if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
+                    updatesFound.incrementAndGet();
+                    plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
+                    
+                    // Get download URL
+                    String downloadUrl = customHttpHandler.getDownloadUrl(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    if (downloadUrl == null) {
+                        plugin.getLogger().warning("Could not get download URL for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
+                    
+                    if (dryRun) {
+                        plugin.getLogger().info(String.format("[DRY-RUN] Would update %s: %s -> %s (URL: %s)", 
+                                pluginName, currentVersion, latestVersion, downloadUrl));
+                        return;
+                    }
+                    
+                    // Download and install update
+                    customHttpHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
+                    downloadsSuccess.incrementAndGet();
+                    
+                    plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
+                    
+                    // Auto-update config.yml if enabled
+                    if (this.configManager.getAutoUpdateConfig()) {
+                        this.configManager.updatePluginVersion(pluginName, latestVersion);
+                    }
+                    
+                    // Notify ops about the update
+                    notifyOps(pluginName, latestVersion);
+                } else {
+                    plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
+                }
+            } catch (Exception e) {
+                downloadsFailed.incrementAndGet();
+                errors.incrementAndGet();
+                plugin.getLogger().severe("Failed to update " + pluginName + " from custom HTTP source: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, executorService);
+    }
+    
+    /**
+     * Update a plugin from any supported source
+     * @param pluginName Name of the plugin to update
+     * @param pluginDetails Details about the plugin
+     * @return CompletableFuture that completes when the update is done
+     */
+    public CompletableFuture<?> updateFromSource(String pluginName, Map<String, Object> pluginDetails) {
+        String source = (String) pluginDetails.get("source");
+        if (source == null) {
+            plugin.getLogger().warning("No source specified for plugin: " + pluginName);
+            return CompletableFuture.completedFuture(null);
+        }
+        
+        return switch (source.toLowerCase()) {
+            case "modrinth" -> updateFromModrinth(pluginName, pluginDetails);
+            case "github" -> updateFromGitHub(pluginName, pluginDetails);
+            case "hangar" -> updateFromHangar(pluginName, pluginDetails);
+            case "spigotmc" -> updateFromSpigotMC(pluginName, pluginDetails);
+            case "local" -> updateFromLocal(pluginName, pluginDetails);
+            case "custom" -> updateFromCustomHttp(pluginName, pluginDetails);
+            default -> {
+                plugin.getLogger().warning("Unknown source for " + pluginName + ": " + source);
+                yield CompletableFuture.completedFuture(null);
+            }
+        };
     }
     
     /**

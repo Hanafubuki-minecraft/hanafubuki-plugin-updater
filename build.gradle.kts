@@ -27,6 +27,9 @@ dependencies {
     // SnakeYAML for config parsing
     implementation("org.yaml:snakeyaml:2.7")
     
+    // JsonPath for custom HTTP source
+    implementation("com.jayway.jsonpath:json-path:2.9.0")
+    
     // JUnit for testing - use BOM for aligned versions
     testImplementation(platform("org.junit:junit-bom:5.10.3"))
     testImplementation("org.junit.jupiter:junit-jupiter")
@@ -47,7 +50,12 @@ java {
 }
 
 tasks.processResources {
-    expand(project.properties)
+    // Don't expand config.yml as it contains $ characters (JSONPath) that conflict with Groovy templates
+    exclude("config.yml")
+    // Expand other resources (like plugin.yml) with project properties
+    filesMatching("**/plugin.yml") {
+        expand(project.properties)
+    }
 }
 
 tasks.test {
