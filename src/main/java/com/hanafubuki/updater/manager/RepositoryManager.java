@@ -6,17 +6,23 @@ import java.net.URI;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.nio.file.Paths;
 import java.time.Duration;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
+import org.bukkit.plugin.Plugin;
 import org.bukkit.plugin.java.JavaPlugin;
 
 import com.hanafubuki.updater.source.ModrinthSourceHandler;
 import com.hanafubuki.updater.source.GitHubSourceHandler;
 import com.hanafubuki.updater.util.VersionUtils;
+
+import java.util.logging.Logger;
 
 /**
  * Manager class that handles updates from different repository sources
@@ -27,6 +33,7 @@ public class RepositoryManager {
     private final ModrinthSourceHandler modrinthHandler;
     private final GitHubSourceHandler gitHubHandler;
     private final JavaPlugin plugin;
+    private final String serverVersion;
     
     public RepositoryManager() {
         this.plugin = com.hanafubuki.updater.PluginUpdater.getPlugin(com.hanafubuki.updater.PluginUpdater.class);
@@ -34,8 +41,33 @@ public class RepositoryManager {
                 .connectTimeout(Duration.ofSeconds(10))
                 .build();
         
-        this.modrinthHandler = new ModrinthSourceHandler(httpClient);
-        this.gitHubHandler = new GitHubSourceHandler(httpClient);
+        // Get plugin version
+        String pluginVersion = plugin.getPluginMeta().getVersion();
+        
+        // Get server version from Bukkit
+        String bukkitVersion = Bukkit.getBukkitVersion();
+        // Extract version like "1.21.9" from "git-Bukkit-1.21.9-R0.1-SNAPSHOT"
+        String extractedVersion = bukkitVersion;
+        if (bukkitVersion.contains("-")) {
+            String[] parts = bukkitVersion.split("-");
+            for (String part : parts) {
+                if (part.matches("\\d+\\.\\d+\\.\\d+.*")) {
+                    extractedVersion = part;
+                    break;
+                }
+            }
+        }
+        this.serverVersion = extractedVersion;
+        
+        // Get plugin logger
+        Logger logger = plugin.getLogger();
+        
+        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger);
+        
+        // Get GitHub token from config if available
+        String githubToken = null;
+        
+        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger);
     }
     
     /**
@@ -46,28 +78,53 @@ public class RepositoryManager {
     public void updateFromModrinth(String pluginName, Map<String, Object> pluginDetails) {
         CompletableFuture.runAsync(() -> {
             try {
+                // Find the installed JAR file
+                Path installedJarPath = findInstalledJar(pluginName);
+                if (installedJarPath == null) {
+                    plugin.getLogger().warning("Could not find installed JAR for plugin: " + pluginName);
+                    return;
+                }
+                
                 // Get current version
                 String currentVersion = (String) pluginDetails.get("version");
                 
                 // Check for updates
-                String latestVersion = modrinthHandler.getLatestVersion(pluginName);
+                String latestVersion = modrinthHandler.getLatestVersion(pluginName, pluginDetails, installedJarPath);
+                
+                if (latestVersion == null) {
+                    plugin.getLogger().info("No compatible version found for " + pluginName + " on Modrinth");
+                    return;
+                }
                 
                 if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
-                    System.out.println("New version available: " + latestVersion);
+                    plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
+                    
+                    // Get download URL
+                    String downloadUrl = modrinthHandler.getDownloadUrl(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    if (downloadUrl == null) {
+                        plugin.getLogger().warning("Could not get download URL for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
+                    
+                    // Get expected SHA-512 for verification
+                    String expectedSha512 = modrinthHandler.getExpectedSha512(pluginName, latestVersion, pluginDetails, installedJarPath);
+                    if (expectedSha512 == null) {
+                        plugin.getLogger().warning("Could not get expected SHA-512 for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
                     
                     // Download and install update
-                    String downloadUrl = modrinthHandler.getDownloadUrl(pluginName, latestVersion);
-                    modrinthHandler.downloadAndInstall(pluginName, downloadUrl);
+                    modrinthHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, expectedSha512);
                     
-                    System.out.println("Successfully updated " + pluginName + " to version " + latestVersion);
+                    plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
                     
                     // Notify ops about the update
                     notifyOps(pluginName, latestVersion);
                 } else {
-                    System.out.println("Plugin " + pluginName + " is up to date");
+                    plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
                 }
             } catch (Exception e) {
-                System.err.println("Failed to update from Modrinth: " + e.getMessage());
+                plugin.getLogger().severe("Failed to update " + pluginName + " from Modrinth: " + e.getMessage());
                 e.printStackTrace();
             }
         });
@@ -81,31 +138,89 @@ public class RepositoryManager {
     public void updateFromGitHub(String pluginName, Map<String, Object> pluginDetails) {
         CompletableFuture.runAsync(() -> {
             try {
+                // Find the installed JAR file
+                Path installedJarPath = findInstalledJar(pluginName);
+                if (installedJarPath == null) {
+                    plugin.getLogger().warning("Could not find installed JAR for plugin: " + pluginName);
+                    return;
+                }
+                
                 // Get current version
                 String currentVersion = (String) pluginDetails.get("version");
                 
                 // Check for updates
-                String latestVersion = gitHubHandler.getLatestVersion(pluginName);
+                String latestVersion = gitHubHandler.getLatestVersion(pluginName, pluginDetails);
+                
+                if (latestVersion == null) {
+                    plugin.getLogger().info("No version found for " + pluginName + " on GitHub");
+                    return;
+                }
                 
                 if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
-                    System.out.println("New version available: " + latestVersion);
+                    plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
+                    
+                    // Get download URL
+                    String downloadUrl = gitHubHandler.getDownloadUrl(pluginName, latestVersion, pluginDetails);
+                    if (downloadUrl == null) {
+                        plugin.getLogger().warning("Could not get download URL for " + pluginName + " version " + latestVersion);
+                        return;
+                    }
                     
                     // Download and install update
-                    String downloadUrl = gitHubHandler.getDownloadUrl(pluginName, latestVersion);
-                    gitHubHandler.downloadAndInstall(pluginName, downloadUrl);
+                    gitHubHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
                     
-                    System.out.println("Successfully updated " + pluginName + " to version " + latestVersion);
+                    plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
                     
                     // Notify ops about the update
                     notifyOps(pluginName, latestVersion);
                 } else {
-                    System.out.println("Plugin " + pluginName + " is up to date");
+                    plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
                 }
             } catch (Exception e) {
-                System.err.println("Failed to update from GitHub: " + e.getMessage());
+                plugin.getLogger().severe("Failed to update " + pluginName + " from GitHub: " + e.getMessage());
                 e.printStackTrace();
             }
         });
+    }
+    
+    /**
+     * Find the installed JAR file for a plugin
+     * @param pluginName Name of the plugin
+     * @return Path to the JAR file or null if not found
+     */
+    private Path findInstalledJar(String pluginName) {
+        // Get plugins directory from plugin's data folder parent
+        File pluginsDir = plugin.getDataFolder().getParentFile();
+        if (pluginsDir == null || !pluginsDir.exists() || !pluginsDir.isDirectory()) {
+            return null;
+        }
+        
+        // Look for JAR file matching plugin name
+        File[] jars = pluginsDir.listFiles((dir, name) -> name.endsWith(".jar"));
+        if (jars == null) {
+            return null;
+        }
+        
+        for (File jar : jars) {
+            // Check if JAR contains plugin.yml with matching name
+            try (var jarFile = new java.util.jar.JarFile(jar)) {
+                var entry = jarFile.getEntry("plugin.yml");
+                if (entry != null) {
+                    try (var is = jarFile.getInputStream(entry);
+                         var reader = new java.io.InputStreamReader(is)) {
+                        var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
+                        String name = yaml.getString("name");
+                        if (pluginName.equalsIgnoreCase(name)) {
+                            return jar.toPath();
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+                // Continue checking other JARs
+            }
+        }
+        
+        return null;
     }
     
     /**

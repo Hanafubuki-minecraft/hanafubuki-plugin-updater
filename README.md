@@ -1,87 +1,157 @@
+<div align="center">
+
 # Hanafubuki Plugin Updater
 
-[![Release](https://img.shields.io/github/v/release/Hanafubuki-minecraft/hanafubuki-plugin-updater)](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
-[![License: GPL v3](https://img.shields.io/badge/License-GPLv3-blue.svg)](https://www.gnu.org/licenses/gpl-3.0)
+[![Paper](https://img.shields.io/badge/Paper-1.21.9-blue)](https://papermc.io/)
+[![Java](https://img.shields.io/badge/Java-21-orange)](https://adoptium.net/)
+[![Gradle](https://img.shields.io/badge/Gradle-Kotlin%20DSL-green)](https://gradle.org/)
+[![License](https://img.shields.io/badge/License-GPLv3-red)](LICENSE)
+[![Modrinth](https://img.shields.io/badge/Source-Modrinth-purple)](https://modrinth.com/)
+[![GitHub](https://img.shields.io/badge/Source-GitHub-black)](https://github.com/)
 
-A Bukkit/Spigot/Paper plugin that automatically updates Minecraft plugins from Modrinth and GitHub sources.
+**Automatic plugin updates for Paper servers from Modrinth and GitHub**
 
-## Features
+[Русский](README.ru.md) | [Configuration](docs/configuration.md) | [Security](docs/security.md) | [Architecture](docs/architecture.md) | [Roadmap](docs/roadmap.md)
 
-- **Automatic plugin updates** from Modrinth and GitHub sources
-- **Version checking and compatibility** with Paper 1.21.9
-- **Easy configuration** via YAML files
-- **Console-friendly output** with MiniMessage styling
-- **Two update modes**: included only, or everything except excluded
-- **Exclusion lists** work in both modes
-- **Safe updates** - never overwrites jars while server runs
+</div>
 
-## Requirements
+---
 
-- Minecraft Server: Paper 1.21.9
-- Java 21
-- Bukkit/Spigot/Paper API
+## How it Works
 
-## Installation
+Hanafubuki Plugin Updater checks your configured plugins against Modrinth and GitHub for newer versions, downloads updates safely to the Bukkit update folder, and notifies operators to restart.
 
-1. Download the latest `.jar` file from the [releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases)
-2. Place the jar file in your `plugins` folder
-3. Start/restart your server
-4. The plugin will generate a default configuration file in `plugins/HanafubukiPluginUpdater/config.yml`
-5. Configure the plugins you want to update in `config.yml`
-
-## Usage
-
-Run the command `/updateplugins` to start the update process. Updates are performed asynchronously and will not block your server.
-
-## Configuration
-
-The plugin uses `config.yml` (auto-generated) and `config.example.yml` for reference:
-
-```yaml
-# Global settings
-global:
-  min_version: "1.0.0"     # Minimum version that plugins must meet to be updated
-  max_version: "99.99.99"  # Maximum version that plugins can be updated to
-
-# Plugin update modes
-modes:
-  include_only: false      # Update only plugins listed in the included list below
-  exclude_list:            # List of plugins to exclude from updates
-    - "plugin-name-1"
-    - "plugin-name-2"
-
-# Plugin list - plugins to update
-plugins:
-  example-plugin:
-    source: "modrinth"     # or "github"
-    version: "1.0.0"       # current version
+```
+┌─────────────────────────────────────────────────────────────┐
+│ 1. Admin runs /updateplugins                                 │
+├─────────────────────────────────────────────────────────────┤
+│ 2. For each configured plugin:                               │
+│    ├─ Modrinth: Compute SHA-512 of installed JAR             │
+│    │         → GET /version_file/{hash} → project_id         │
+│    │         → GET /project/{id}/version?loaders=paper       │
+│    │         → Verify SHA-512 + plugin.yml name              │
+│    └─ GitHub:  GET /repos/{owner}/{repo}/releases/latest     │
+│               → Verify plugin.yml name                       │
+├─────────────────────────────────────────────────────────────┤
+│ 3. If newer version found:                                   │
+│    └─ Download to plugins/update/{name}.jar.part             │
+│       → Atomic move to plugins/update/{name}.jar             │
+├─────────────────────────────────────────────────────────────┤
+│ 4. Broadcast to ops: "Plugin X updated, try restarting"     │
+├─────────────────────────────────────────────────────────────┤
+│ 5. On next restart: Paper swaps JAR automatically            │
+└─────────────────────────────────────────────────────────────┘
 ```
 
-## How It Works
+## Key Features
 
-1. The plugin reads the configuration file to determine which plugins to update
-2. For each plugin, it checks if an update is available from Modrinth or GitHub
-3. If an update is found, it downloads the new version to the `update` folder
-4. Paper will automatically swap the jar on next restart
+| Feature | Description |
+|---------|-------------|
+| **Secure Modrinth lookup** | SHA-512 hash of installed JAR → no search-by-name attacks |
+| **GitHub releases support** | Owner/repo format, asset pattern matching |
+| **Dual update modes** | Include-only or exclude-list (works in both modes) |
+| **Version filtering** | Global and per-plugin min/max version constraints |
+| **Safe installation** | Downloads to `plugins/update/`, atomic move, restart to apply |
+| **Async operations** | All network I/O off main thread via `CompletableFuture` |
+| **MiniMessage styling** | Configurable colors, gradients, formatting |
+| **Operator notifications** | Broadcast on successful update |
 
-## API Requirements
+## Setup
 
-The plugin requires specific User-Agent headers when making requests to APIs:
-- **Modrinth**: `"HanafubukiPluginUpdater/1.0.0"`
-- **GitHub**: `"HanafubukiPluginUpdater/1.0.0"`
+### Requirements
+- **Java 21**
+- **Paper 1.21.9** (also works on forks: Purpur, Pufferfish, etc.)
+- Geyser/Floodgate/ViaVersion compatible
+
+### Installation
+1. Download the latest `.jar` from [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
+2. Drop it into your server's `plugins/` folder
+3. Start/restart the server
+4. Edit `plugins/HanafubukiPluginUpdater/config.yml` (generated on first run)
+5. Run `/updateplugins` to check for updates
+
+### Configuration
+
+Copy `config.yml` and customize:
+
+```yaml
+global:
+  min_version: "1.0.0"
+  max_version: "99.99.99"
+
+modes:
+  include_only: false          # true = only update plugins in include_list
+  exclude_list: []             # plugins to skip (both modes)
+  include_list: []             # plugins to update (include_only mode)
+
+plugins:
+  "WorldEdit":
+    source: "modrinth"
+    version: "7.3.12"
+    # project_id: "worldedit"  # optional: explicit Modrinth ID/slug
+  
+  "Paper":
+    source: "github"
+    version: "1.21.9-R0.1"
+    repo: "PaperMC/Paper"
+    # asset_pattern: "paper-*.jar"
+```
+
+See [Configuration Reference](docs/configuration.md) for full schema.
+
+## Commands
+
+| Command | Permission | Description |
+|---------|------------|-------------|
+| `/updateplugins` | `hanafubuki.updater.update` | Check and download plugin updates |
+| `/updateplugins reload` | `hanafubuki.updater.update` | Reload configuration (planned) |
+| `/updateplugins --dry-run` | `hanafubuki.updater.update` | Preview updates without downloading (planned) |
+
+Default permission: **OP only**
+
+## Releasing
+
+Built and published via GitHub Actions on version bump:
+
+1. Update `version=` in `gradle.properties`
+2. `git commit -am "Release vX.Y.Z"`
+3. `git tag vX.Y.Z`
+4. `git push origin master --tags`
+5. GitHub Actions builds, signs, and publishes to Releases
+
+### Local Build (for development)
+```bash
+./gradlew build
+# Output: build/libs/hanafubuki-plugin-updater-<version>.jar
+```
+
+## Tech Stack
+
+- **Java 21** + **Gradle Kotlin DSL**
+- **Paper API** 1.21.9 (compileOnly)
+- **Gson** for JSON parsing
+- **SnakeYAML** for config (via Bukkit)
+- **Modrinth API v2** (labrinth)
+- **GitHub REST API v3**
+
+## Security
+
+See [Security Documentation](docs/security.md) for details on:
+- SHA-512 hash-based Modrinth identification (no search)
+- Download verification (hash + plugin.yml name)
+- Safe update mechanics (update folder + atomic move)
+- Threat model and mitigations
 
 ## License
 
-This project is licensed under the GPLv3 license - see the [LICENSE](LICENSE) file for details.
+**GPLv3** — same as other Hanafubuki plugins.
 
-## Development
+© 2026 **ByteMe6** / **Hanafubuki-minecraft**
 
-To build this plugin:
+---
 
-1. Clone the repository
-2. Run `./gradlew build` 
-3. The built jar will be in `build/libs/`
+<div align="center">
 
-## Contributing
+*Part of the [Hanafubuki](https://github.com/Hanafubuki-minecraft) ecosystem*
 
-Contributions are welcome! Please feel free to submit a Pull Request.
+</div>

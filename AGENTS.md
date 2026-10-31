@@ -18,6 +18,7 @@ Never invent URLs, repo names or API endpoints. If unsure, fetch the docs.
 ## Paths
 Project root: /home/samedy/hanafubuki-plugin-updater
 Always use absolute paths starting with "/". Never create nested "home/samedy/..." dirs.
+All docs are in docs/ folder, check them if something unclear.
 
 ## Tech stack
 - Java 21, Gradle (Kotlin DSL: build.gradle.kts, settings.gradle.kts)
@@ -88,3 +89,8 @@ Give the subagent full context: it does not see this conversation.
 - Read docs/ before any design decision. If behavior changes, update docs/ in the same task.
 - After a finished task: `git add -A && git commit -m "<what>" && git push origin master`.
 - One task per session. Do not touch files outside the task.
+
+## Important notes
+Check docs for everything that could be unclear in your implementing, if something still unclear ask user, do not guess, never. 
+Use github, commit for every feture, after some part of job done change version to newer and commit it to github, do not forget about pushes. You are workign on real, woreking plugin, not a prototype.
+After big part of job done, give short overview to user, on russian

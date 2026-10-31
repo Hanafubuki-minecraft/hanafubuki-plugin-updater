@@ -1,14 +1,14 @@
 package com.hanafubuki.updater.config;
 
 import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileOutputStream;
 import java.io.IOException;
-import java.util.HashMap;
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
 
+import org.bukkit.configuration.ConfigurationSection;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -19,11 +19,11 @@ import com.hanafubuki.updater.PluginUpdater;
  */
 public class ConfigManager {
     
-    private Map<String, Object> config;
+    private YamlConfiguration yaml;
     private final JavaPlugin plugin;
     
     public ConfigManager() {
-        this.config = new HashMap<>();
+        this.yaml = new YamlConfiguration();
         this.plugin = PluginUpdater.getPlugin(PluginUpdater.class);
     }
     
@@ -41,8 +41,7 @@ public class ConfigManager {
             plugin.saveResource("config.yml", false);
         }
         
-        YamlConfiguration yaml = YamlConfiguration.loadConfiguration(configFile);
-        config = yaml.getValues(true);
+        yaml = YamlConfiguration.loadConfiguration(configFile);
     }
     
     /**
@@ -50,7 +49,8 @@ public class ConfigManager {
      * @return Global configuration map
      */
     public Map<String, Object> getGlobalConfig() {
-        return (Map<String, Object>) config.get("global");
+        ConfigurationSection section = yaml.getConfigurationSection("global");
+        return section != null ? section.getValues(false) : Map.of();
     }
     
     /**
@@ -58,7 +58,8 @@ public class ConfigManager {
      * @return Modes configuration map
      */
     public Map<String, Object> getModesConfig() {
-        return (Map<String, Object>) config.get("modes");
+        ConfigurationSection section = yaml.getConfigurationSection("modes");
+        return section != null ? section.getValues(false) : Map.of();
     }
     
     /**
@@ -66,8 +67,7 @@ public class ConfigManager {
      * @return true if include-only mode is enabled, false otherwise
      */
     public boolean getIncludeOnlyMode() {
-        Map<String, Object> modes = getModesConfig();
-        return modes != null ? (Boolean) modes.getOrDefault("include_only", false) : false;
+        return yaml.getBoolean("modes.include_only", false);
     }
     
     /**
@@ -75,11 +75,17 @@ public class ConfigManager {
      * @return List of excluded plugin names
      */
     public List<String> getExcludeList() {
-        Map<String, Object> modes = getModesConfig();
-        if (modes != null && modes.containsKey("exclude_list")) {
-            return (List<String>) modes.get("exclude_list");
-        }
-        return List.of();
+        List<String> list = yaml.getStringList("modes.exclude_list");
+        return list != null ? list : Collections.emptyList();
+    }
+    
+    /**
+     * Get the list of included plugins (for include-only mode)
+     * @return List of included plugin names
+     */
+    public List<String> getIncludeList() {
+        List<String> list = yaml.getStringList("modes.include_list");
+        return list != null ? list : Collections.emptyList();
     }
     
     /**
@@ -98,10 +104,8 @@ public class ConfigManager {
      * @return true if plugin is included, false otherwise
      */
     public boolean isPluginIncluded(String pluginName) {
-        // This would normally read from a configured "include_list" 
-        // For now, we'll assume all plugins are included in include_only mode
-        // This should be implemented based on your actual include list structure
-        return true;
+        List<String> includeList = getIncludeList();
+        return includeList.contains(pluginName);
     }
     
     /**
@@ -109,7 +113,18 @@ public class ConfigManager {
      * @return Map of plugin configurations
      */
     public Map<String, Object> getPlugins() {
-        return (Map<String, Object>) config.get("plugins");
+        ConfigurationSection section = yaml.getConfigurationSection("plugins");
+        if (section == null) {
+            return Map.of();
+        }
+        Map<String, Object> result = new java.util.HashMap<>();
+        for (String key : section.getKeys(false)) {
+            ConfigurationSection pluginSection = section.getConfigurationSection(key);
+            if (pluginSection != null) {
+                result.put(key, pluginSection.getValues(false));
+            }
+        }
+        return result;
     }
     
     /**
@@ -118,11 +133,8 @@ public class ConfigManager {
      * @return Plugin configuration map
      */
     public Map<String, Object> getPluginDetails(String pluginName) {
-        Map<String, Object> plugins = getPlugins();
-        if (plugins != null && plugins.containsKey(pluginName)) {
-            return (Map<String, Object>) plugins.get(pluginName);
-        }
-        return new HashMap<>();
+        ConfigurationSection section = yaml.getConfigurationSection("plugins." + pluginName);
+        return section != null ? section.getValues(false) : Map.of();
     }
     
     /**
@@ -130,7 +142,8 @@ public class ConfigManager {
      * @return Modrinth configuration map
      */
     public Map<String, Object> getModrinthConfig() {
-        return (Map<String, Object>) config.get("modrinth");
+        ConfigurationSection section = yaml.getConfigurationSection("modrinth");
+        return section != null ? section.getValues(false) : Map.of();
     }
     
     /**
@@ -138,7 +151,8 @@ public class ConfigManager {
      * @return GitHub configuration map
      */
     public Map<String, Object> getGitHubConfig() {
-        return (Map<String, Object>) config.get("github");
+        ConfigurationSection section = yaml.getConfigurationSection("github");
+        return section != null ? section.getValues(false) : Map.of();
     }
     
     /**
@@ -146,7 +160,8 @@ public class ConfigManager {
      * @return Console configuration map
      */
     public Map<String, Object> getConsoleConfig() {
-        return (Map<String, Object>) config.get("console");
+        ConfigurationSection section = yaml.getConfigurationSection("console");
+        return section != null ? section.getValues(false) : Map.of();
     }
     
     /**
@@ -154,6 +169,6 @@ public class ConfigManager {
      * @return Commit message template string
      */
     public String getCommitMessage() {
-        return (String) config.getOrDefault("commit_message", "Plugin {plugin} updated, try restarting");
+        return yaml.getString("commit_message", "Plugin {plugin} updated, try restarting");
     }
 }

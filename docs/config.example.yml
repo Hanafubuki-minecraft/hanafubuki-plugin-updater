@@ -90,9 +90,10 @@ plugins:
   # ============================================
   # MODRINTH PLUGINS
   # ============================================
-  # For Modrinth plugins, only 'source' and 'version' are required.
-  # The plugin will auto-detect the project ID by searching the name.
-  # You can optionally specify 'project_id' to avoid search.
+  # For Modrinth plugins, 'source' and 'version' are required.
+  # The plugin identifies the project by SHA-512 hash of the installed JAR
+  # (secure, no search by name). You can optionally specify 'project_id'
+  # (Modrinth project ID or slug) to override hash-based lookup.
   
   # Example: WorldEdit (Modrinth)
   "WorldEdit":
