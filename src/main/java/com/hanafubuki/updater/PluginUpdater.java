@@ -53,6 +53,11 @@ public class PluginUpdater extends JavaPlugin {
         // Start health check endpoint if enabled
         startHealthCheckEndpoint();
         
+        // Run auto-discovery on startup if enabled
+        if (configManager.getAutoDiscoverOnStartup()) {
+            runAutoDiscoveryOnStartup();
+        }
+        
         getLogger().info("Hanafubuki Plugin Updater enabled!");
     }
     
@@ -293,16 +298,80 @@ public class PluginUpdater extends JavaPlugin {
     }
     
     /**
+     * Run auto-discovery on startup (async)
+     */
+    private void runAutoDiscoveryOnStartup() {
+        CompletableFuture.runAsync(() -> {
+            try {
+                getLogger().info("Running auto-discovery on startup...");
+                List<ConfigManager.DiscoveredPlugin> discovered = configManager.discoverUnknownPlugins();
+                
+                if (discovered.isEmpty()) {
+                    getLogger().info("Auto-discovery complete: no unknown plugins found");
+                    return;
+                }
+                
+                int added = 0;
+                for (ConfigManager.DiscoveredPlugin dp : discovered) {
+                    if (configManager.addDiscoveredPlugin(
+                            dp.name(), dp.version(), dp.source(),
+                            dp.projectId(), dp.repo(), dp.hangarSlug(),
+                            dp.spigotmcResourceId(), dp.spigotmcResourceName(),
+                            dp.localPath(), dp.customUrl())) {
+                        added++;
+                    }
+                }
+                
+                getLogger().info("Auto-discovery complete: added " + added + " of " + discovered.size() + " plugins to config.yml");
+                if (added > 0) {
+                    getLogger().info("Restart the server to apply plugin updates for newly discovered plugins");
+                }
+                
+            } catch (Exception e) {
+                getLogger().severe("Error during auto-discovery on startup: " + e.getMessage());
+                e.printStackTrace();
+            }
+        }, executorService);
+    }
+
+    /**
      * Handle the /updateplugins discover command
      * Lists discovered plugins not in config and optionally adds them
+     * Usage:
+     *   /updateplugins discover              - list unknown plugins
+     *   /updateplugins discover add          - add all unknown plugins to config
+     *   /updateplugins discover add <name>   - add specific plugin to config
+     *   /updateplugins discover --auto       - run auto-discovery now (even if disabled in config)
      */
     private void handleDiscoverCommand(CommandSender sender, String[] args) {
-        if (!configManager.getAutoDiscover()) {
-            sender.sendMessage(ChatColor.RED + "Auto-discovery is disabled. Enable 'global.auto_discover' in config.yml to use this command.");
-            return;
+        boolean autoRun = false;
+        boolean shouldAdd = false;
+        String specificPlugin = null;
+        
+        // Parse arguments
+        for (int i = 1; i < args.length; i++) {
+            if (args[i].equalsIgnoreCase("--auto")) {
+                autoRun = true;
+            } else if (args[i].equalsIgnoreCase("add")) {
+                shouldAdd = true;
+                // Check if next argument is a plugin name (not a flag)
+                if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
+                    specificPlugin = args[i + 1];
+                    i++; // Skip the plugin name
+                }
+            }
         }
         
-        boolean shouldAdd = args.length > 1 && args[1].equalsIgnoreCase("add");
+        // Capture for lambda (must be effectively final)
+        final String targetPlugin = specificPlugin;
+        final boolean addMode = shouldAdd;
+        final boolean autoMode = autoRun;
+        
+        // Check if auto-discovery is enabled (unless --auto flag is used)
+        if (!autoMode && !configManager.getAutoDiscover()) {
+            sender.sendMessage(ChatColor.RED + "Auto-discovery is disabled. Enable 'global.auto_discover' in config.yml to use this command, or use --auto flag.");
+            return;
+        }
         
         CompletableFuture.runAsync(() -> {
             try {
@@ -313,29 +382,37 @@ public class PluginUpdater extends JavaPlugin {
                     return;
                 }
                 
-                if (!shouldAdd) {
+                // Filter for specific plugin if requested
+                if (targetPlugin != null) {
+                    discovered = discovered.stream()
+                        .filter(dp -> dp.name().equalsIgnoreCase(targetPlugin))
+                        .toList();
+                    if (discovered.isEmpty()) {
+                        sender.sendMessage(ChatColor.RED + "Plugin '" + targetPlugin + "' not found among unknown plugins.");
+                        return;
+                    }
+                }
+                
+                if (!addMode) {
+                    // List mode
                     sender.sendMessage(ChatColor.GOLD + "=== Discovered " + discovered.size() + " unknown plugin(s) ===");
                     for (ConfigManager.DiscoveredPlugin dp : discovered) {
                         sender.sendMessage(ChatColor.YELLOW + "  - " + dp.name() + " v" + dp.version() + " (source: " + dp.source() + ")");
                     }
                     sender.sendMessage(ChatColor.AQUA + "Use /updateplugins discover add to add all to config.yml");
+                    sender.sendMessage(ChatColor.AQUA + "Use /updateplugins discover add <PluginName> to add a specific plugin");
+                    sender.sendMessage(ChatColor.AQUA + "Use /updateplugins discover --auto to run auto-discovery now");
                     return;
                 }
                 
-                // Add all discovered plugins to config
+                // Add mode
                 int added = 0;
                 for (ConfigManager.DiscoveredPlugin dp : discovered) {
-                    String projectId = null;
-                    String repo = null;
-                    
-                    // For GitHub plugins, we need the repo - can't auto-detect reliably
-                    // For Modrinth, we'll rely on hash-based lookup (project_id optional)
-                    if ("github".equals(dp.source())) {
-                        // Try to get repo from plugin.yml
-                        repo = extractGitHubRepo(dp.jarFile());
-                    }
-                    
-                    if (configManager.addDiscoveredPlugin(dp.name(), dp.version(), dp.source(), projectId, repo)) {
+                    if (configManager.addDiscoveredPlugin(
+                            dp.name(), dp.version(), dp.source(),
+                            dp.projectId(), dp.repo(), dp.hangarSlug(),
+                            dp.spigotmcResourceId(), dp.spigotmcResourceName(),
+                            dp.localPath(), dp.customUrl())) {
                         added++;
                         sender.sendMessage(ChatColor.GREEN + "Added: " + dp.name() + " v" + dp.version() + " (" + dp.source() + ")");
                     } else {
@@ -344,7 +421,26 @@ public class PluginUpdater extends JavaPlugin {
                 }
                 
                 sender.sendMessage(ChatColor.GOLD + "Added " + added + " of " + discovered.size() + " plugins to config.yml");
-                sender.sendMessage(ChatColor.YELLOW + "Note: GitHub plugins need 'repo' (owner/repo) configured manually if not auto-detected.");
+                
+                // Provide guidance for incomplete configurations
+                boolean hasIncomplete = discovered.stream().anyMatch(dp -> {
+                    if ("github".equals(dp.source()) && (dp.repo() == null || dp.repo().isEmpty())) return true;
+                    if ("hangar".equals(dp.source()) && (dp.hangarSlug() == null || dp.hangarSlug().isEmpty())) return true;
+                    if ("spigotmc".equals(dp.source()) && (dp.spigotmcResourceId() == null || dp.spigotmcResourceId().isEmpty()) && 
+                        (dp.spigotmcResourceName() == null || dp.spigotmcResourceName().isEmpty())) return true;
+                    if ("local".equals(dp.source()) && (dp.localPath() == null || dp.localPath().isEmpty())) return true;
+                    if ("custom".equals(dp.source()) && (dp.customUrl() == null || dp.customUrl().isEmpty())) return true;
+                    return false;
+                });
+                
+                if (hasIncomplete) {
+                    sender.sendMessage(ChatColor.YELLOW + "Note: Some plugins have incomplete configuration. Edit config.yml to add missing fields:");
+                    sender.sendMessage(ChatColor.YELLOW + "  - GitHub plugins need 'repo' (owner/repo)");
+                    sender.sendMessage(ChatColor.YELLOW + "  - Hangar plugins need 'project_slug' (owner/slug)");
+                    sender.sendMessage(ChatColor.YELLOW + "  - SpigotMC plugins need 'resource_id' or 'resource_name'");
+                    sender.sendMessage(ChatColor.YELLOW + "  - Local plugins need 'path'");
+                    sender.sendMessage(ChatColor.YELLOW + "  - Custom plugins need 'url'");
+                }
                 
             } catch (Exception e) {
                 getLogger().severe("Error during plugin discovery: " + e.getMessage());
@@ -353,7 +449,7 @@ public class PluginUpdater extends JavaPlugin {
             }
         });
     }
-    
+
     /**
      * Try to extract GitHub repo from plugin.yml
      */
@@ -381,6 +477,92 @@ public class PluginUpdater extends JavaPlugin {
                             String[] parts = path.split("/");
                             if (parts.length >= 2) {
                                 return parts[0] + "/" + parts[1];
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+    
+    /**
+     * Try to extract Hangar slug from plugin.yml
+     */
+    private String extractHangarSlug(File jarFile) {
+        if (jarFile == null || !jarFile.exists()) {
+            return null;
+        }
+        
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
+            var entry = jar.getEntry("plugin.yml");
+            if (entry != null) {
+                try (var is = jar.getInputStream(entry);
+                     var reader = new java.io.InputStreamReader(is)) {
+                    var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
+                    
+                    // Check for website URL that might be Hangar
+                    String website = yaml.getString("website");
+                    if (website != null && website.contains("hangar.papermc.io")) {
+                        try {
+                            java.net.URL url = new java.net.URL(website);
+                            String path = url.getPath();
+                            if (path.startsWith("/")) path = path.substring(1);
+                            // hangar.papermc.io/plugins/owner/slug
+                            String[] parts = path.split("/");
+                            if (parts.length >= 3 && "plugins".equals(parts[0])) {
+                                return parts[1] + "/" + parts[2];
+                            }
+                        } catch (Exception ignored) {
+                        }
+                    }
+                }
+            }
+        } catch (Exception ignored) {
+        }
+        return null;
+    }
+    
+    /**
+     * Try to extract SpigotMC resource ID from plugin.yml
+     */
+    private String extractSpigotMCResourceId(File jarFile) {
+        if (jarFile == null || !jarFile.exists()) {
+            return null;
+        }
+        
+        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
+            var entry = jar.getEntry("plugin.yml");
+            if (entry != null) {
+                try (var is = jar.getInputStream(entry);
+                     var reader = new java.io.InputStreamReader(is)) {
+                    var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
+                    
+                    // Check for explicit spigotmc.resource_id field
+                    String resourceId = yaml.getString("spigotmc.resource_id");
+                    if (resourceId != null && !resourceId.isEmpty()) {
+                        try {
+                            Integer.parseInt(resourceId);
+                            return resourceId;
+                        } catch (NumberFormatException ignored) {
+                        }
+                    }
+                    
+                    // Check website URL for SpigotMC resource pattern
+                    String website = yaml.getString("website");
+                    if (website != null && website.contains("spigotmc.org")) {
+                        // SpigotMC URLs like: https://www.spigotmc.org/resources/name.12345/
+                        // We can try to extract numeric ID from URL
+                        try {
+                            java.net.URL url = new java.net.URL(website);
+                            String path = url.getPath();
+                            // Look for pattern .12345/ or .12345
+                            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\.(\\d+)(?:/|$)");
+                            java.util.regex.Matcher matcher = pattern.matcher(path);
+                            if (matcher.find()) {
+                                return matcher.group(1);
                             }
                         } catch (Exception ignored) {
                         }

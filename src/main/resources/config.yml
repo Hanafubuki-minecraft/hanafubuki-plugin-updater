@@ -17,6 +17,10 @@ global:
   # When true, discovered plugins can be added via /updateplugins discover
   auto_discover: false
   
+  # Auto-discover plugins on plugin enable (startup)
+  # When true, runs discovery once per server start and adds unknown plugins to config
+  auto_discover_on_startup: false
+  
   # Auto-update config.yml with new versions after successful update
   auto_update_config: true
 

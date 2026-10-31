@@ -419,6 +419,14 @@ public class ConfigManager {
     }
 
     /**
+     * Check if auto-discovery on startup is enabled
+     * @return true if auto-discovery on startup is enabled, false otherwise
+     */
+    public boolean getAutoDiscoverOnStartup() {
+        return yaml.getBoolean("global.auto_discover_on_startup", false);
+    }
+
+    /**
      * Update the version of a plugin in config.yml
      * @param pluginName Name of the plugin
      * @param newVersion New version string
@@ -579,16 +587,127 @@ public class ConfigManager {
             try {
                 String version = loadedPlugin.getPluginMeta().getVersion();
                 File jarFile = getPluginJarFile(loadedPlugin);
-                String source = detectPluginSource(jarFile, pluginName);
+                DiscoveredPlugin dp = discoverPluginDetails(loadedPlugin, pluginName, version, jarFile);
                 
-                discovered.add(new DiscoveredPlugin(pluginName, version, source, jarFile));
-                logger.info("Discovered unknown plugin: " + pluginName + " v" + version + " (source: " + source + ")");
+                discovered.add(dp);
+                logger.info("Auto-discovered and added to config: " + pluginName + " v" + version + " (" + dp.source() + ")");
             } catch (Exception e) {
                 logger.warning("Failed to discover plugin " + pluginName + ": " + e.getMessage());
             }
         }
         
         return discovered;
+    }
+
+    /**
+     * Discover detailed information about a single plugin
+     * @param loadedPlugin The loaded Bukkit plugin
+     * @param pluginName Name of the plugin
+     * @param version Current version
+     * @param jarFile JAR file of the plugin
+     * @return DiscoveredPlugin with all extracted metadata
+     */
+    private DiscoveredPlugin discoverPluginDetails(org.bukkit.plugin.Plugin loadedPlugin, String pluginName, String version, File jarFile) {
+        String source = detectPluginSource(jarFile, pluginName);
+        String projectId = null;
+        String repo = null;
+        String hangarSlug = null;
+        String spigotmcResourceId = null;
+        String spigotmcResourceName = null;
+        String localPath = null;
+        String customUrl = null;
+        
+        if (jarFile != null && jarFile.exists()) {
+            try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
+                var entry = jar.getEntry("plugin.yml");
+                if (entry != null) {
+                    try (var is = jar.getInputStream(entry);
+                         var reader = new java.io.InputStreamReader(is)) {
+                        var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
+                        
+                        // Extract source-specific metadata
+                        projectId = yaml.getString("modrinth.project_id");
+                        hangarSlug = yaml.getString("hangar.slug");
+                        spigotmcResourceId = yaml.getString("spigotmc.resource_id");
+                        spigotmcResourceName = yaml.getString("spigotmc.resource_name");
+                        localPath = yaml.getString("local.path");
+                        customUrl = yaml.getString("custom.url");
+                        
+                        // Try to extract GitHub repo from website
+                        if ("github".equals(source)) {
+                            repo = extractGitHubRepoFromWebsite(yaml);
+                        }
+                        
+                        // Try to extract Hangar slug from website
+                        if ("hangar".equals(source) && hangarSlug == null) {
+                            hangarSlug = extractHangarSlugFromWebsite(yaml);
+                        }
+                        
+                        // Try to extract SpigotMC resource from website
+                        if ("spigotmc".equals(source) && spigotmcResourceId == null && spigotmcResourceName == null) {
+                            extractSpigotMCFromWebsite(yaml);
+                        }
+                    }
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        
+        return new DiscoveredPlugin(pluginName, version, source, jarFile, 
+            projectId, repo, hangarSlug, spigotmcResourceId, spigotmcResourceName, localPath, customUrl);
+    }
+
+    /**
+     * Extract GitHub repo from website URL in plugin.yml
+     */
+    private String extractGitHubRepoFromWebsite(org.bukkit.configuration.file.YamlConfiguration yaml) {
+        String website = yaml.getString("website");
+        if (website != null && website.contains("github.com")) {
+            try {
+                java.net.URL url = new java.net.URL(website);
+                String path = url.getPath();
+                if (path.startsWith("/")) path = path.substring(1);
+                String[] parts = path.split("/");
+                if (parts.length >= 2) {
+                    return parts[0] + "/" + parts[1];
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extract Hangar slug from website URL in plugin.yml
+     */
+    private String extractHangarSlugFromWebsite(org.bukkit.configuration.file.YamlConfiguration yaml) {
+        String website = yaml.getString("website");
+        if (website != null && website.contains("hangar.papermc.io")) {
+            try {
+                java.net.URL url = new java.net.URL(website);
+                String path = url.getPath();
+                if (path.startsWith("/")) path = path.substring(1);
+                // hangar.papermc.io/plugins/owner/slug
+                String[] parts = path.split("/");
+                if (parts.length >= 3 && "plugins".equals(parts[0])) {
+                    return parts[1] + "/" + parts[2];
+                }
+            } catch (Exception ignored) {
+            }
+        }
+        return null;
+    }
+
+    /**
+     * Extract SpigotMC resource ID/name from website URL in plugin.yml
+     */
+    private void extractSpigotMCFromWebsite(org.bukkit.configuration.file.YamlConfiguration yaml) {
+        String website = yaml.getString("website");
+        if (website != null && website.contains("spigotmc.org")) {
+            // SpigotMC URLs are typically like: https://www.spigotmc.org/resources/name.12345/
+            // We can't reliably extract resource_id from URL alone without API call
+            // This is a placeholder for future enhancement
+        }
     }
 
     /**
@@ -607,7 +726,7 @@ public class ConfigManager {
 
     /**
      * Detect plugin source from plugin.yml in JAR
-     * Checks for modrinth/github metadata or defaults to modrinth
+     * Checks for modrinth/github/hangar/spigotmc metadata or defaults to modrinth
      */
     private String detectPluginSource(File jarFile, String pluginName) {
         if (jarFile == null || !jarFile.exists()) {
@@ -621,32 +740,76 @@ public class ConfigManager {
                      var reader = new java.io.InputStreamReader(is)) {
                     var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
                     
-                    // Check for explicit source metadata
+                    // Check for explicit source field
                     String source = yaml.getString("source");
                     if (source != null) {
                         String lower = source.toLowerCase();
-                        if ("modrinth".equals(lower) || "github".equals(lower)) {
+                        if ("modrinth".equals(lower) || "github".equals(lower) || "hangar".equals(lower) || 
+                            "spigotmc".equals(lower) || "local".equals(lower) || "custom".equals(lower)) {
                             return lower;
                         }
+                    }
+                    
+                    // Check for custom fields indicating source
+                    String modrinthProjectId = yaml.getString("modrinth.project_id");
+                    if (modrinthProjectId != null && !modrinthProjectId.isEmpty()) {
+                        return "modrinth";
+                    }
+                    
+                    String hangarSlug = yaml.getString("hangar.slug");
+                    if (hangarSlug != null && !hangarSlug.isEmpty()) {
+                        return "hangar";
+                    }
+                    
+                    String spigotmcResourceId = yaml.getString("spigotmc.resource_id");
+                    if (spigotmcResourceId != null && !spigotmcResourceId.isEmpty()) {
+                        return "spigotmc";
+                    }
+                    
+                    String localPath = yaml.getString("local.path");
+                    if (localPath != null && !localPath.isEmpty()) {
+                        return "local";
+                    }
+                    
+                    String customUrl = yaml.getString("custom.url");
+                    if (customUrl != null && !customUrl.isEmpty()) {
+                        return "custom";
                     }
                     
                     // Check for website/URL that might indicate source
                     String website = yaml.getString("website");
                     if (website != null) {
-                        if (website.contains("modrinth.com")) {
+                        String lowerWebsite = website.toLowerCase();
+                        if (lowerWebsite.contains("modrinth.com")) {
                             return "modrinth";
                         }
-                        if (website.contains("github.com")) {
+                        if (lowerWebsite.contains("github.com")) {
                             return "github";
+                        }
+                        if (lowerWebsite.contains("hangar.papermc.io")) {
+                            return "hangar";
+                        }
+                        if (lowerWebsite.contains("spigotmc.org")) {
+                            return "spigotmc";
                         }
                     }
                     
-                    // Check for authors with known patterns
+                    // Check authors/description for hints
                     List<String> authors = yaml.getStringList("authors");
-                    for (String author : authors) {
-                        if (author.toLowerCase().contains("modrinth")) {
-                            return "modrinth";
-                        }
+                    String description = yaml.getString("description", "");
+                    String combined = String.join(" ", authors) + " " + description;
+                    String lowerCombined = combined.toLowerCase();
+                    if (lowerCombined.contains("modrinth")) {
+                        return "modrinth";
+                    }
+                    if (lowerCombined.contains("hangar")) {
+                        return "hangar";
+                    }
+                    if (lowerCombined.contains("spigotmc")) {
+                        return "spigotmc";
+                    }
+                    if (lowerCombined.contains("github")) {
+                        return "github";
                     }
                 }
             }
@@ -660,12 +823,20 @@ public class ConfigManager {
      * Add a discovered plugin to config.yml
      * @param pluginName Name of the plugin
      * @param version Current version
-     * @param source Source (modrinth or github)
+     * @param source Source (modrinth, github, hangar, spigotmc, local, custom)
      * @param projectId Optional Modrinth project ID
      * @param repo Optional GitHub repo (owner/repo)
+     * @param hangarSlug Optional Hangar project slug (owner/slug)
+     * @param spigotmcResourceId Optional SpigotMC resource ID
+     * @param spigotmcResourceName Optional SpigotMC resource name
+     * @param localPath Optional local file path
+     * @param customUrl Optional custom HTTP URL
      * @return true if added successfully
      */
-    public boolean addDiscoveredPlugin(String pluginName, String version, String source, String projectId, String repo) {
+    public boolean addDiscoveredPlugin(String pluginName, String version, String source, 
+                                        String projectId, String repo, String hangarSlug,
+                                        String spigotmcResourceId, String spigotmcResourceName,
+                                        String localPath, String customUrl) {
         try {
             ConfigurationSection pluginsSection = yaml.getConfigurationSection("plugins");
             if (pluginsSection == null) {
@@ -682,6 +853,33 @@ public class ConfigManager {
             
             if ("github".equals(source) && repo != null && !repo.isEmpty()) {
                 pluginSection.set("repo", repo);
+            }
+            
+            if ("hangar".equals(source) && hangarSlug != null && !hangarSlug.isEmpty()) {
+                pluginSection.set("project_slug", hangarSlug);
+            }
+            
+            if ("spigotmc".equals(source)) {
+                if (spigotmcResourceId != null && !spigotmcResourceId.isEmpty()) {
+                    try {
+                        pluginSection.set("resource_id", Integer.parseInt(spigotmcResourceId));
+                    } catch (NumberFormatException e) {
+                        // Fall back to resource_name
+                        if (spigotmcResourceName != null && !spigotmcResourceName.isEmpty()) {
+                            pluginSection.set("resource_name", spigotmcResourceName);
+                        }
+                    }
+                } else if (spigotmcResourceName != null && !spigotmcResourceName.isEmpty()) {
+                    pluginSection.set("resource_name", spigotmcResourceName);
+                }
+            }
+            
+            if ("local".equals(source) && localPath != null && !localPath.isEmpty()) {
+                pluginSection.set("path", localPath);
+            }
+            
+            if ("custom".equals(source) && customUrl != null && !customUrl.isEmpty()) {
+                pluginSection.set("url", customUrl);
             }
             
             // Save to file
@@ -707,6 +905,18 @@ public class ConfigManager {
         String name,
         String version,
         String source,
-        File jarFile
-    ) {}
+        File jarFile,
+        String projectId,
+        String repo,
+        String hangarSlug,
+        String spigotmcResourceId,
+        String spigotmcResourceName,
+        String localPath,
+        String customUrl
+    ) {
+        // Backward compatibility constructor
+        public DiscoveredPlugin(String name, String version, String source, File jarFile) {
+            this(name, version, source, jarFile, null, null, null, null, null, null, null);
+        }
+    }
 }
