@@ -1,98 +1,107 @@
 package com.hanafubuki.updater.util;
 
+import static org.junit.jupiter.api.Assertions.assertEquals;
+import static org.junit.jupiter.api.Assertions.assertFalse;
+import static org.junit.jupiter.api.Assertions.assertThrows;
+import static org.junit.jupiter.api.Assertions.assertTrue;
+
+import java.util.ArrayList;
+import java.util.List;
+
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.params.ParameterizedTest;
 import org.junit.jupiter.params.provider.CsvSource;
 
-import static org.junit.jupiter.api.Assertions.*;
-
-/**
- * Tests for VersionUtils version comparison logic.
- */
 class VersionUtilsTest {
 
-    @ParameterizedTest
+    @ParameterizedTest(name = "{0} > {1}")
     @CsvSource({
-        // Basic version comparison
-        "1.0.1, 1.0.0, true",
-        "1.1.0, 1.0.0, true",
-        "2.0.0, 1.9.9, true",
-        "1.0.0, 1.0.1, false",
-        "1.0.0, 1.0.0, false",
-
-        // Pre-release handling (release > pre-release)
-        "1.21.9, 1.21.9-R0.1-SNAPSHOT, true",
-        "1.21.9, 1.21.9-beta, true",
-        "1.21.9, 1.21.9-rc1, true",
-        "1.21.9, 1.21.9-alpha, true",
-
-        // Pre-release type ordering: release > rc > beta > alpha > SNAPSHOT
-        "1.21.9-rc1, 1.21.9-beta, true",
-        "1.21.9-rc1, 1.21.9-alpha, true",
-        "1.21.9-beta, 1.21.9-alpha, true",
-        "1.21.9-beta, 1.21.9-SNAPSHOT, true",
-        "1.21.9-alpha, 1.21.9-SNAPSHOT, true",
-
-        // Paper-style versions
-        "1.21.9-R0.2, 1.21.9-R0.1, true",
-        "1.21.9-R0.1, 1.21.9-R0.1-SNAPSHOT, true",
-        "1.21.9-R1.0, 1.21.9-R0.1, true",
-
-        // Numeric suffix comparison
-        "1.21.9-rc2, 1.21.9-rc1, true",
-        "1.21.9-beta2, 1.21.9-beta1, true",
-        "1.21.9-alpha3, 1.21.9-alpha2, true",
-
-        // Special cases
-        "latest, 1.0.0, true",
-        "1.0.0, latest, false",
-
-        // Edge cases - different lengths (1.0 == 1.0.0)
-        "1.0, 1.0.0, false",
-        "1.0.0.0, 1.0.0, false",
+            // v prefix (GitHub tags) - the old code read "v2.0.0" as 0.0.0
+            "v2.0.0, 1.5.0",
+            "V1.2.4, 1.2.3",
+            "release-1.3, 1.2.9",
+            // more segments
+            "1.2.3.4, 1.2.3",
+            "1.10.0, 1.9.9",
+            "2.0, 1.99.99",
+            // pre-release order
+            "2.0.0, 2.0.0-rc1",
+            "2.0.0-rc1, 2.0.0-beta.5",
+            "2.0.0-beta.2, 2.0.0-beta.1",
+            "2.0.0-beta.1, 2.0.0-alpha.9",
+            "2.0.0-alpha, 2.0.0-SNAPSHOT",
+            "1.0.1-SNAPSHOT, 1.0.0",
+            // build numbers
+            "2.12.1-b1280, 2.12.1-b1279",
+            "5.12.3-SNAPSHOT+1113, 5.12.3-SNAPSHOT+1112",
+            "1.0.0-45, 1.0.0-44",
+            "2.12.2-b1, 2.12.1-b9999",
+            // platform words are ignored
+            "v5.5.71-bukkit, 5.5.70",
     })
-    void testIsVersionNewer(String newVersion, String currentVersion, boolean expected) {
-        assertEquals(expected, VersionUtils.isVersionNewer(newVersion, currentVersion),
-            String.format("isVersionNewer('%s', '%s') should be %s", newVersion, currentVersion, expected));
+    void newer(String newer, String older) {
+        assertTrue(VersionUtils.isNewer(newer, older), newer + " should be newer than " + older);
+        assertFalse(VersionUtils.isNewer(older, newer), older + " should not be newer than " + newer);
     }
 
-    @ParameterizedTest
+    @ParameterizedTest(name = "{0} == {1}")
     @CsvSource({
-        "1.0.0, 1.0.0, true",
-        "1.0.1, 1.0.0, true",
-        "2.0.0, 1.0.0, true",
-        "1.0.0, 1.0.1, false",
-        "1.21.9, 1.21.9-R0.1, true",
-        "1.21.9-R0.1, 1.21.9, false",
-        "1.0.0, none, true",  // minVersion="none" means no minimum
-        "1.0.0, NONE, true",
+            "1.2, 1.2.0",
+            "v1.2.3, 1.2.3",
+            "v5.5.71-bukkit, 5.5.71",
+            "1.2.3-paper, 1.2.3",
+            "2.0.0-Final, 2.0.0",
     })
-    void testMeetsMinimumVersion(String pluginVersion, String minVersion, boolean expected) {
-        assertEquals(expected, VersionUtils.meetsMinimumVersion(pluginVersion, minVersion),
-            String.format("meetsMinimumVersion('%s', '%s') should be %s", pluginVersion, minVersion, expected));
+    void equal(String a, String b) {
+        assertEquals(0, VersionUtils.compare(a, b));
+        assertFalse(VersionUtils.isNewer(a, b));
+        assertFalse(VersionUtils.isNewer(b, a));
     }
 
     @Test
-    void testNullHandling() {
-        assertFalse(VersionUtils.isVersionNewer(null, "1.0.0"));
-        assertFalse(VersionUtils.isVersionNewer("1.0.0", null));
-        assertFalse(VersionUtils.isVersionNewer(null, null));
-
-        assertFalse(VersionUtils.meetsMinimumVersion(null, "1.0.0"));
-        assertFalse(VersionUtils.meetsMinimumVersion("1.0.0", null));
+    void blankAndNullAreNeverNewer() {
+        assertFalse(VersionUtils.isNewer(null, "1.0"));
+        assertFalse(VersionUtils.isNewer("1.0", null));
+        assertFalse(VersionUtils.isNewer("", "1.0"));
+        assertFalse(VersionUtils.isNewer("latest", "1.0"), "'latest' is not a version and must not trigger downloads");
     }
 
     @Test
-    void testEmptyStrings() {
-        // Empty strings are treated as version 0.0.0
-        assertFalse(VersionUtils.isVersionNewer("", "1.0.0"));
-        assertTrue(VersionUtils.isVersionNewer("1.0.0", ""));
+    void comparatorSorts() {
+        List<String> versions = new ArrayList<>(List.of("1.10", "v1.2", "1.2-beta", "1.9.1", "1.2.0.1"));
+        versions.sort(VersionUtils.COMPARATOR);
+        assertEquals(List.of("1.2-beta", "v1.2", "1.2.0.1", "1.9.1", "1.10"), versions);
     }
 
     @Test
-    void testPaperStyleVersions() {
-        // Paper versions like 1.21.9-R0.1 should be parsed correctly
-        assertTrue(VersionUtils.isVersionNewer("1.21.9-R0.2", "1.21.9-R0.1"));
-        assertTrue(VersionUtils.isVersionNewer("1.21.9-R1.0", "1.21.9-R0.9"));
+    void inRange() {
+        assertTrue(VersionUtils.inRange("1.5", "1.0", "2.0"));
+        assertTrue(VersionUtils.inRange("1.0", "1.0", "2.0"));
+        assertTrue(VersionUtils.inRange("2.0", "1.0", "2.0"));
+        assertFalse(VersionUtils.inRange("0.9", "1.0", "2.0"));
+        assertFalse(VersionUtils.inRange("2.0.1", "1.0", "2.0"));
+        assertTrue(VersionUtils.inRange("99.0", null, "latest"));
+        assertTrue(VersionUtils.inRange("0.1", "none", ""));
+    }
+
+    @Test
+    void advisoryRanges() {
+        assertTrue(VersionUtils.matchesRange("1.0.0", ">= 1.0.0, < 1.0.1"));
+        assertFalse(VersionUtils.matchesRange("1.0.1", ">= 1.0.0, < 1.0.1"));
+        assertTrue(VersionUtils.matchesRange("1.9", "< 2.0"));
+        assertTrue(VersionUtils.matchesRange("2.0", "<= 2.0"));
+        assertTrue(VersionUtils.matchesRange("2.0.0", "= 2.0.0"));
+        assertTrue(VersionUtils.matchesRange("2.0.0", "2.0.0"));
+        assertFalse(VersionUtils.matchesRange("2.0.1", "= 2.0.0"));
+        assertTrue(VersionUtils.matchesRange("v3.1", "> 3.0"));
+        assertThrows(IllegalArgumentException.class, () -> VersionUtils.matchesRange("1.0", ""));
+        assertThrows(IllegalArgumentException.class, () -> VersionUtils.matchesRange("1.0", ">="));
+    }
+
+    @Test
+    void normalize() {
+        assertEquals("2.0.0", VersionUtils.normalize("v2.0.0"));
+        assertEquals("1.3", VersionUtils.normalize("release-1.3"));
+        assertEquals("abc", VersionUtils.normalize("abc"));
     }
 }

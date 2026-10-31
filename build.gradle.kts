@@ -1,6 +1,5 @@
 plugins {
-    `java-library`
-    `maven-publish`
+    java
 }
 
 group = "com.hanafubuki"
@@ -12,34 +11,23 @@ repositories {
         name = "PaperMC"
         url = uri("https://repo.papermc.io/repository/maven-public/")
     }
-    maven {
-        name = "Sonatype"
-        url = uri("https://oss.sonatype.org/content/repositories/snapshots/")
-    }
 }
 
 dependencies {
+    // Paper API. Paper also ships Gson, SnakeYAML and Adventure (MiniMessage) at runtime,
+    // so the plugin jar needs no bundled libraries.
     compileOnly("io.papermc.paper:paper-api:1.21.9-R0.1-SNAPSHOT")
-    
-    // Gson for JSON parsing
-    implementation("com.google.code.gson:gson:2.15.0")
-    
-    // SnakeYAML for config parsing
-    implementation("org.yaml:snakeyaml:2.7")
-    
-    // JsonPath for custom HTTP source
-    implementation("com.jayway.jsonpath:json-path:2.9.0")
-    
-    // JUnit for testing - use BOM for aligned versions
-    testImplementation(platform("org.junit:junit-bom:5.10.3"))
+
+    // The core (update engine, sources, utilities) only uses Gson and SnakeYAML.
+    // Versions match what Paper 1.21.9 provides at runtime.
+    compileOnly("com.google.code.gson:gson:2.11.0")
+    compileOnly("org.yaml:snakeyaml:2.2")
+
+    testImplementation(platform("org.junit:junit-bom:5.11.4"))
     testImplementation("org.junit.jupiter:junit-jupiter")
-    testImplementation("org.junit.jupiter:junit-jupiter-params")
-    
-    // Mockito
-    testImplementation("org.mockito:mockito-core:5.12.0")
-    testImplementation("org.mockito:mockito-junit-jupiter:5.12.0")
-    
-    // Paper API for tests (needed for YamlConfiguration, etc.)
+    testRuntimeOnly("org.junit.platform:junit-platform-launcher")
+    testImplementation("com.google.code.gson:gson:2.11.0")
+    testImplementation("org.yaml:snakeyaml:2.2")
     testImplementation("io.papermc.paper:paper-api:1.21.9-R0.1-SNAPSHOT")
 }
 
@@ -49,15 +37,25 @@ java {
     }
 }
 
+tasks.withType<JavaCompile>().configureEach {
+    options.encoding = "UTF-8"
+    options.release.set(21)
+    options.compilerArgs.addAll(listOf("-Xlint:unchecked", "-Xlint:rawtypes"))
+}
+
 tasks.processResources {
-    // Don't expand config.yml as it contains $ characters (JSONPath) that conflict with Groovy templates
-    exclude("config.yml")
-    // Expand other resources (like plugin.yml) with project properties
-    filesMatching("**/plugin.yml") {
-        expand(project.properties)
+    val props = mapOf("version" to project.version.toString())
+    inputs.properties(props)
+    // Only plugin.yml is a template. config.yml is copied as-is.
+    filesMatching("plugin.yml") {
+        expand(props)
     }
 }
 
 tasks.test {
     useJUnitPlatform()
+    testLogging {
+        events("failed")
+        exceptionFormat = org.gradle.api.tasks.testing.logging.TestExceptionFormat.FULL
+    }
 }
