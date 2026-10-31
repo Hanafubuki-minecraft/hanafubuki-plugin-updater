@@ -162,6 +162,17 @@ public final class HttpService {
      * @param maxBytes largest accepted file size
      */
     public void download(URI uri, Map<String, String> headers, Path target, Duration timeout, long maxBytes) throws IOException {
+        try {
+            downloadWithRetries(uri, headers, target, timeout, maxBytes);
+        } catch (IOException e) {
+            // Also covers failures outside a single attempt: connection errors and giving up after retries.
+            Files.deleteIfExists(target);
+            throw e;
+        }
+    }
+
+    private void downloadWithRetries(URI uri, Map<String, String> headers, Path target, Duration timeout, long maxBytes)
+            throws IOException {
         withRetries("download " + describe(uri), () -> {
             Exchange<InputStream> ex = sendFollowingRedirects(uri, headers, timeout, HttpResponse.BodyHandlers.ofInputStream());
             try (InputStream in = ex.response.body()) {

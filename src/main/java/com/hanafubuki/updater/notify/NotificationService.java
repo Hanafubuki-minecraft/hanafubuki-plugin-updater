@@ -7,6 +7,7 @@ import java.time.Instant;
 import java.util.ArrayList;
 import java.util.EnumSet;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
@@ -41,6 +42,8 @@ public final class NotificationService implements UpdateListener {
     static final int COLOR_SUMMARY = 0xC4B5FD;
     private static final int MAX_EMBEDS = 10;
     private static final int MAX_DESCRIPTION = 4000;
+    /** Discord limit for all embed titles and descriptions of one message together. */
+    private static final int MAX_MESSAGE_CHARS = 6000;
 
     private final UpdaterSettings.Notifications settings;
     private final HttpService http;
@@ -149,7 +152,7 @@ public final class NotificationService implements UpdateListener {
             for (PluginResult r : report.withAlerts()) {
                 for (GitHubAdvisories.Alert a : r.alerts()) {
                     JsonObject e = embed("Security advisory for " + r.plugin() + " " + r.installedVersion(),
-                            "**" + a.severity().toUpperCase() + "** " + abbreviate(a.summary(), 500)
+                            "**" + a.severity().toUpperCase(Locale.ROOT) + "** " + abbreviate(a.summary(), 500)
                                     + (a.patched() == null ? "" : "\nPatched in: " + a.patched())
                                     + (a.cve() == null ? "" : "\n" + a.cve()), COLOR_SECURITY);
                     if (a.url() != null) {
@@ -163,15 +166,22 @@ public final class NotificationService implements UpdateListener {
             embeds.add(embed("Update check finished on " + serverName, summaryText(report), COLOR_SUMMARY));
         }
         List<JsonObject> messages = new ArrayList<>();
-        for (int i = 0; i < embeds.size(); i += MAX_EMBEDS) {
-            JsonObject msg = discordBase(discord);
-            JsonArray arr = new JsonArray();
-            embeds.subList(i, Math.min(embeds.size(), i + MAX_EMBEDS)).forEach(arr::add);
-            msg.add("embeds", arr);
-            if (i > 0) {
-                msg.remove("content");
+        JsonArray current = null;
+        int chars = 0;
+        for (JsonObject embed : embeds) {
+            int size = embed.get("title").getAsString().length() + embed.get("description").getAsString().length();
+            if (current == null || current.size() >= MAX_EMBEDS || chars + size > MAX_MESSAGE_CHARS) {
+                JsonObject msg = discordBase(discord);
+                if (!messages.isEmpty()) {
+                    msg.remove("content");
+                }
+                current = new JsonArray();
+                msg.add("embeds", current);
+                messages.add(msg);
+                chars = 0;
             }
-            messages.add(msg);
+            current.add(embed);
+            chars += size;
         }
         return messages;
     }
@@ -236,7 +246,7 @@ public final class NotificationService implements UpdateListener {
             sb.append(" (cancelled)");
         }
         sb.append('\n');
-        report.counts().forEach((status, count) -> sb.append(status.name().toLowerCase().replace('_', ' '))
+        report.counts().forEach((status, count) -> sb.append(status.name().toLowerCase(Locale.ROOT).replace('_', ' '))
                 .append(": ").append(count).append('\n'));
         return sb.toString();
     }
@@ -266,7 +276,7 @@ public final class NotificationService implements UpdateListener {
             JsonObject o = new JsonObject();
             o.addProperty("plugin", r.plugin());
             o.addProperty("source", r.source());
-            o.addProperty("status", r.status().name().toLowerCase());
+            o.addProperty("status", r.status().name().toLowerCase(Locale.ROOT));
             o.addProperty("installed_version", r.installedVersion());
             o.addProperty("new_version", r.candidateVersion());
             o.addProperty("message", r.message());
@@ -297,7 +307,7 @@ public final class NotificationService implements UpdateListener {
         JsonObject p = new JsonObject();
         p.addProperty("event", "run_finished");
         JsonArray ev = new JsonArray();
-        happened.forEach(e -> ev.add(e.name().toLowerCase()));
+        happened.forEach(e -> ev.add(e.name().toLowerCase(Locale.ROOT)));
         p.add("events", ev);
         p.addProperty("server", serverName);
         p.addProperty("trigger", report.trigger());
@@ -306,7 +316,7 @@ public final class NotificationService implements UpdateListener {
         p.addProperty("started", report.started().toString());
         p.addProperty("finished", report.finished().toString());
         JsonObject counts = new JsonObject();
-        report.counts().forEach((k, v) -> counts.addProperty(k.name().toLowerCase(), v));
+        report.counts().forEach((k, v) -> counts.addProperty(k.name().toLowerCase(Locale.ROOT), v));
         p.add("counts", counts);
         p.add("results", results);
         return java.util.Optional.of(p);

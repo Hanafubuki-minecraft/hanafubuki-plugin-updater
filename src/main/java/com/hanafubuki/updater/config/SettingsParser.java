@@ -133,6 +133,10 @@ public final class SettingsParser {
         Schedule d = Schedule.DISABLED;
         Schedule.Mode mode;
         String modeText = string("schedule.mode", "off").toLowerCase(Locale.ROOT);
+        if (modeText.equals("false")) {
+            // YAML 1.1 reads a bare "off" as boolean false.
+            modeText = "off";
+        }
         try {
             mode = Schedule.Mode.valueOf(modeText.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
@@ -170,6 +174,10 @@ public final class SettingsParser {
 
     private UpdaterSettings.DependencyMode dependencyMode() {
         String m = string("dependencies.check", "block").toUpperCase(Locale.ROOT);
+        if (m.equals("FALSE")) {
+            // YAML 1.1 reads a bare "off" as boolean false.
+            m = "OFF";
+        }
         try {
             return UpdaterSettings.DependencyMode.valueOf(m);
         } catch (IllegalArgumentException e) {
