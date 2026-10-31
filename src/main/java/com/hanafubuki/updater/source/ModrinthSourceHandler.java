@@ -16,9 +16,12 @@ import java.security.MessageDigest;
 import java.security.NoSuchAlgorithmException;
 import java.time.Duration;
 import java.util.Map;
+import java.util.Random;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
+import java.util.function.Function;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonArray;
@@ -34,6 +37,15 @@ import com.hanafubuki.updater.util.JarUtils;
  */
 public class ModrinthSourceHandler {
     
+    /**
+     * Functional interface for handling HTTP responses that may throw IOException
+     * @param <T> Return type
+     */
+    @FunctionalInterface
+    private interface ThrowingFunction<T, R> {
+        R apply(T t) throws IOException;
+    }
+    
     private final HttpClient httpClient;
     private final String baseUrl;
     private final Gson gson;
@@ -44,6 +56,10 @@ public class ModrinthSourceHandler {
     private final int apiTimeoutSeconds;
     private final int downloadTimeoutSeconds;
     private final String updateFolderName;
+    private final int maxRetries;
+    private final int baseDelayMs;
+    private final int maxDelayMs;
+    private final Random random;
     
     /**
      * Constructor for ModrinthSourceHandler
@@ -55,8 +71,11 @@ public class ModrinthSourceHandler {
      * @param apiTimeoutSeconds API request timeout in seconds
      * @param downloadTimeoutSeconds Download timeout in seconds
      * @param updateFolderName The name of the update folder (from bukkit.yml settings.update-folder)
+     * @param maxRetries Maximum number of retry attempts (default: 3)
+     * @param baseDelayMs Base delay in milliseconds (default: 1000)
+     * @param maxDelayMs Maximum delay in milliseconds (default: 10000)
      */
-    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger, ExecutorService executorService, int apiTimeoutSeconds, int downloadTimeoutSeconds, String updateFolderName) {
+    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger, ExecutorService executorService, int apiTimeoutSeconds, int downloadTimeoutSeconds, String updateFolderName, int maxRetries, int baseDelayMs, int maxDelayMs) {
         this.httpClient = httpClient;
         this.baseUrl = "https://api.modrinth.com/v2";
         this.gson = new Gson();
@@ -67,6 +86,17 @@ public class ModrinthSourceHandler {
         this.apiTimeoutSeconds = apiTimeoutSeconds;
         this.downloadTimeoutSeconds = downloadTimeoutSeconds;
         this.updateFolderName = updateFolderName != null ? updateFolderName : "update";
+        this.maxRetries = maxRetries > 0 ? maxRetries : 3;
+        this.baseDelayMs = baseDelayMs > 0 ? baseDelayMs : 1000;
+        this.maxDelayMs = maxDelayMs > 0 ? maxDelayMs : 10000;
+        this.random = new Random();
+    }
+    
+    /**
+     * Backward compatible constructor without retry parameters
+     */
+    public ModrinthSourceHandler(HttpClient httpClient, String serverVersion, String pluginVersion, Logger logger, ExecutorService executorService, int apiTimeoutSeconds, int downloadTimeoutSeconds, String updateFolderName) {
+        this(httpClient, serverVersion, pluginVersion, logger, executorService, apiTimeoutSeconds, downloadTimeoutSeconds, updateFolderName, 3, 1000, 10000);
     }
     
     /**
@@ -79,6 +109,143 @@ public class ModrinthSourceHandler {
                 + URLEncoder.encode(serverVersion, StandardCharsets.UTF_8) 
                 + URLEncoder.encode("\"]", StandardCharsets.UTF_8);
         return baseUrl + "/project/" + projectId + "/version?loaders=" + loadersParam + "&game_versions=" + gameVersionsParam;
+    }
+    
+    /**
+     * Execute an HTTP request with exponential backoff retry logic
+     * @param requestBuilder Function that creates the HttpRequest
+     * @param responseHandler Function that handles the HttpResponse
+     * @param operationName Name of the operation for logging
+     * @return Response body or null on failure
+     */
+    private <T> T executeWithRetry(HttpRequest.Builder requestBuilder, ThrowingFunction<HttpResponse<String>, T> responseHandler, String operationName) throws IOException {
+        HttpRequest request = requestBuilder.build();
+        
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+                int statusCode = response.statusCode();
+                
+                // Check if we should retry
+                if (shouldRetry(statusCode)) {
+                    if (attempt < maxRetries) {
+                        long delay = calculateDelay(attempt);
+                        logger.warning(String.format("Retrying %s (attempt %d/%d) after %dms - HTTP %d", 
+                                operationName, attempt + 1, maxRetries, delay, statusCode));
+                        Thread.sleep(delay);
+                        continue;
+                    } else {
+                        throw new IOException(String.format("Max retries exceeded for %s: HTTP %d - %s", 
+                                operationName, statusCode, response.body()));
+                    }
+                }
+                
+                // Success or non-retryable error
+                return responseHandler.apply(response);
+                
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                throw new IOException("Request interrupted: " + operationName, e);
+            } catch (IOException e) {
+                if (attempt < maxRetries) {
+                    long delay = calculateDelay(attempt);
+                    logger.warning(String.format("Retrying %s (attempt %d/%d) after %dms - %s", 
+                            operationName, attempt + 1, maxRetries, delay, e.getMessage()));
+                    try {
+                        Thread.sleep(delay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Request interrupted: " + operationName, ie);
+                    }
+                    continue;
+                }
+                throw e;
+            }
+        }
+        
+        throw new IOException("Unexpected end of retry loop for: " + operationName);
+    }
+    
+    /**
+     * Execute an HTTP request with exponential backoff retry logic for file downloads
+     * @param requestBuilder Function that creates the HttpRequest
+     * @param targetPath Path to save the downloaded file
+     * @param operationName Name of the operation for logging
+     */
+    private void executeDownloadWithRetry(HttpRequest.Builder requestBuilder, Path targetPath, String operationName) throws IOException {
+        HttpRequest request = requestBuilder.build();
+        
+        for (int attempt = 0; attempt <= maxRetries; attempt++) {
+            try {
+                HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(targetPath));
+                int statusCode = response.statusCode();
+                
+                // Check if we should retry
+                if (shouldRetry(statusCode)) {
+                    if (attempt < maxRetries) {
+                        long delay = calculateDelay(attempt);
+                        logger.warning(String.format("Retrying %s (attempt %d/%d) after %dms - HTTP %d", 
+                                operationName, attempt + 1, maxRetries, delay, statusCode));
+                        Thread.sleep(delay);
+                        // Clean up partial download
+                        Files.deleteIfExists(targetPath);
+                        continue;
+                    } else {
+                        Files.deleteIfExists(targetPath);
+                        throw new IOException(String.format("Max retries exceeded for %s: HTTP %d", 
+                                operationName, statusCode));
+                    }
+                }
+                
+                // Success or non-retryable error
+                if (statusCode != 200) {
+                    Files.deleteIfExists(targetPath);
+                    throw new IOException("HTTP " + statusCode + " downloading " + operationName);
+                }
+                return;
+                
+            } catch (InterruptedException e) {
+                Thread.currentThread().interrupt();
+                Files.deleteIfExists(targetPath);
+                throw new IOException("Request interrupted: " + operationName, e);
+            } catch (IOException e) {
+                if (attempt < maxRetries) {
+                    long delay = calculateDelay(attempt);
+                    logger.warning(String.format("Retrying %s (attempt %d/%d) after %dms - %s", 
+                            operationName, attempt + 1, maxRetries, delay, e.getMessage()));
+                    try {
+                        Thread.sleep(delay);
+                    } catch (InterruptedException ie) {
+                        Thread.currentThread().interrupt();
+                        throw new IOException("Request interrupted: " + operationName, ie);
+                    }
+                    Files.deleteIfExists(targetPath);
+                    continue;
+                }
+                Files.deleteIfExists(targetPath);
+                throw e;
+            }
+        }
+        
+        throw new IOException("Unexpected end of retry loop for: " + operationName);
+    }
+    
+    /**
+     * Determine if a status code should trigger a retry
+     * Retries on: 429 (rate limit), 5xx (server errors)
+     */
+    private boolean shouldRetry(int statusCode) {
+        return statusCode == 429 || (statusCode >= 500 && statusCode < 600);
+    }
+    
+    /**
+     * Calculate delay with exponential backoff and jitter
+     * delay = min(baseDelay * 2^attempt + jitter, maxDelay)
+     */
+    private long calculateDelay(int attempt) {
+        long exponentialDelay = baseDelayMs * (1L << attempt);
+        long jitter = random.nextInt((int) Math.min(baseDelayMs, 1000));
+        return Math.min(exponentialDelay + jitter, maxDelayMs);
     }
     
     /**
@@ -100,64 +267,62 @@ public class ModrinthSourceHandler {
             }
             
             // Get project versions with filters for Paper and server version
-            // URL-encode the query parameters (square brackets must be encoded)
-            String loadersParam = URLEncoder.encode("[\"paper\"]", StandardCharsets.UTF_8);
-            String gameVersionsParam = URLEncoder.encode("[\"", StandardCharsets.UTF_8) + URLEncoder.encode(serverVersion, StandardCharsets.UTF_8) + URLEncoder.encode("\"]", StandardCharsets.UTF_8);
-            String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=" + loadersParam + "&game_versions=" + gameVersionsParam;
-            HttpRequest request = HttpRequest.newBuilder()
+            String versionsUrl = buildVersionsUrl(projectId);
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
-                    .GET()
-                    .build();
+                    .GET();
             
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String responseBody = executeWithRetry(requestBuilder, response -> {
+                if (response.statusCode() == 200) {
+                    return response.body();
+                } else {
+                    throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
+                }
+            }, "getLatestVersion for " + pluginName);
             
-            if (response.statusCode() == 200) {
-                JsonArray versionsJson = gson.fromJson(response.body(), JsonArray.class);
+            JsonArray versionsJson = gson.fromJson(responseBody, JsonArray.class);
+            
+            // Find the latest version compatible with Paper and server version
+            for (JsonElement element : versionsJson) {
+                JsonObject versionObj = element.getAsJsonObject();
                 
-                // Find the latest version compatible with Paper and server version
-                for (JsonElement element : versionsJson) {
-                    JsonObject versionObj = element.getAsJsonObject();
-                    
-                    // Check if this version supports Paper loader
-                    JsonArray loaders = versionObj.getAsJsonArray("loaders");
-                    boolean hasPaperLoader = false;
-                    if (loaders != null) {
-                        for (JsonElement loader : loaders) {
-                            if ("paper".equalsIgnoreCase(loader.getAsString())) {
-                                hasPaperLoader = true;
-                                break;
-                            }
+                // Check if this version supports Paper loader
+                JsonArray loaders = versionObj.getAsJsonArray("loaders");
+                boolean hasPaperLoader = false;
+                if (loaders != null) {
+                    for (JsonElement loader : loaders) {
+                        if ("paper".equalsIgnoreCase(loader.getAsString())) {
+                            hasPaperLoader = true;
+                            break;
                         }
-                    }
-                    
-                    // Check if this version supports server version
-                    JsonArray gameVersions = versionObj.getAsJsonArray("game_versions");
-                    boolean hasServerVersion = false;
-                    if (gameVersions != null) {
-                        for (JsonElement gameVersion : gameVersions) {
-                            if (serverVersion.equalsIgnoreCase(gameVersion.getAsString())) {
-                                hasServerVersion = true;
-                                break;
-                            }
-                        }
-                    }
-                    
-                    // If version supports both Paper loader and server version, return it
-                    if (hasPaperLoader && hasServerVersion) {
-                        return versionObj.get("version_number").getAsString();
                     }
                 }
                 
-                // If no compatible version found, return the first one
-                if (!versionsJson.isEmpty()) {
-                    JsonObject firstVersion = versionsJson.get(0).getAsJsonObject();
-                    return firstVersion.get("version_number").getAsString();
+                // Check if this version supports server version
+                JsonArray gameVersions = versionObj.getAsJsonArray("game_versions");
+                boolean hasServerVersion = false;
+                if (gameVersions != null) {
+                    for (JsonElement gameVersion : gameVersions) {
+                        if (serverVersion.equalsIgnoreCase(gameVersion.getAsString())) {
+                            hasServerVersion = true;
+                            break;
+                        }
+                    }
                 }
-            } else {
-                throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
+                
+                // If version supports both Paper loader and server version, return it
+                if (hasPaperLoader && hasServerVersion) {
+                    return versionObj.get("version_number").getAsString();
+                }
+            }
+            
+            // If no compatible version found, return the first one
+            if (!versionsJson.isEmpty()) {
+                JsonObject firstVersion = versionsJson.get(0).getAsJsonObject();
+                return firstVersion.get("version_number").getAsString();
             }
             
         } catch (Exception e) {
@@ -187,43 +352,44 @@ public class ModrinthSourceHandler {
             
             // Get project versions and find the one matching our version
             String versionsUrl = buildVersionsUrl(projectId);
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
-                    .GET()
-                    .build();
+                    .GET();
             
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String responseBody = executeWithRetry(requestBuilder, response -> {
+                if (response.statusCode() == 200) {
+                    return response.body();
+                } else {
+                    throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
+                }
+            }, "getDownloadUrl for " + pluginName);
             
-            if (response.statusCode() == 200) {
-                JsonArray versionsJson = gson.fromJson(response.body(), JsonArray.class);
+            JsonArray versionsJson = gson.fromJson(responseBody, JsonArray.class);
+            
+            // Find the specific version
+            for (JsonElement element : versionsJson) {
+                JsonObject versionObj = element.getAsJsonObject();
+                String versionNumber = versionObj.get("version_number").getAsString();
                 
-                // Find the specific version
-                for (JsonElement element : versionsJson) {
-                    JsonObject versionObj = element.getAsJsonObject();
-                    String versionNumber = versionObj.get("version_number").getAsString();
-                    
-                    if (version.equals(versionNumber)) {
-                        // Get the files for this version - find primary file
-                        JsonArray files = versionObj.getAsJsonArray("files");
-                        if (files != null && !files.isEmpty()) {
-                            // Look for primary file first
-                            for (JsonElement fileElement : files) {
-                                JsonObject file = fileElement.getAsJsonObject();
-                                if (file.get("primary").getAsBoolean()) {
-                                    return file.get("url").getAsString();
-                                }
+                if (version.equals(versionNumber)) {
+                    // Get the files for this version - find primary file
+                    JsonArray files = versionObj.getAsJsonArray("files");
+                    if (files != null && !files.isEmpty()) {
+                        // Look for primary file first
+                        for (JsonElement fileElement : files) {
+                            JsonObject file = fileElement.getAsJsonObject();
+                            if (file.get("primary").getAsBoolean()) {
+                                return file.get("url").getAsString();
                             }
-                            // Fallback to first file
-                            JsonObject file = files.get(0).getAsJsonObject();
-                            return file.get("url").getAsString();
                         }
+                        // Fallback to first file
+                        JsonObject file = files.get(0).getAsJsonObject();
+                        return file.get("url").getAsString();
                     }
                 }
-            } else {
-                throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
             }
             
         } catch (Exception e) {
@@ -256,19 +422,13 @@ public class ModrinthSourceHandler {
             // Download the file
             logger.info("Downloading " + pluginName + " from: " + downloadUrl);
             
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(downloadUrl))
                     .timeout(Duration.ofSeconds(downloadTimeoutSeconds))
                     .header("User-Agent", userAgent)
-                    .GET()
-                    .build();
+                    .GET();
             
-            HttpResponse<Path> response = httpClient.send(request, HttpResponse.BodyHandlers.ofFile(tempFile));
-            
-            if (response.statusCode() != 200) {
-                Files.deleteIfExists(tempFile);
-                throw new IOException("HTTP " + response.statusCode() + " downloading " + pluginName);
-            }
+            executeDownloadWithRetry(requestBuilder, tempFile, "downloadAndInstall for " + pluginName);
             
             // Verify SHA-512 hash
             String actualSha512 = computeSha512(tempFile);
@@ -330,24 +490,25 @@ public class ModrinthSourceHandler {
     private String getProjectIdFromHash(String sha512) throws IOException {
         try {
             String url = baseUrl + "/version_file/" + sha512 + "?algorithm=sha512";
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(url))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
-                    .GET()
-                    .build();
+                    .GET();
             
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String responseBody = executeWithRetry(requestBuilder, response -> {
+                if (response.statusCode() == 200) {
+                    JsonObject versionObj = gson.fromJson(response.body(), JsonObject.class);
+                    return versionObj.get("project_id").getAsString();
+                } else if (response.statusCode() == 404) {
+                    return null; // Hash not found on Modrinth
+                } else {
+                    throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
+                }
+            }, "getProjectIdFromHash for " + sha512.substring(0, 16) + "...");
             
-            if (response.statusCode() == 200) {
-                JsonObject versionObj = gson.fromJson(response.body(), JsonObject.class);
-                return versionObj.get("project_id").getAsString();
-            } else if (response.statusCode() == 404) {
-                return null; // Hash not found on Modrinth
-            } else {
-                throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
-            }
+            return responseBody;
             
         } catch (Exception e) {
             throw new IOException("Failed to get project ID from hash: " + e.getMessage(), e);
@@ -403,42 +564,45 @@ public class ModrinthSourceHandler {
             }
             
             String versionsUrl = buildVersionsUrl(projectId);
-            HttpRequest request = HttpRequest.newBuilder()
+            HttpRequest.Builder requestBuilder = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
                     .header("Accept", "application/json")
                     .header("User-Agent", userAgent)
-                    .GET()
-                    .build();
+                    .GET();
             
-            HttpResponse<String> response = httpClient.send(request, HttpResponse.BodyHandlers.ofString());
+            String responseBody = executeWithRetry(requestBuilder, response -> {
+                if (response.statusCode() == 200) {
+                    return response.body();
+                } else {
+                    throw new IOException("HTTP " + response.statusCode() + ": " + response.body());
+                }
+            }, "getExpectedSha512 for " + pluginName);
             
-            if (response.statusCode() == 200) {
-                JsonArray versionsJson = gson.fromJson(response.body(), JsonArray.class);
+            JsonArray versionsJson = gson.fromJson(responseBody, JsonArray.class);
+            
+            for (JsonElement element : versionsJson) {
+                JsonObject versionObj = element.getAsJsonObject();
+                String versionNumber = versionObj.get("version_number").getAsString();
                 
-                for (JsonElement element : versionsJson) {
-                    JsonObject versionObj = element.getAsJsonObject();
-                    String versionNumber = versionObj.get("version_number").getAsString();
-                    
-                    if (version.equals(versionNumber)) {
-                        JsonArray files = versionObj.getAsJsonArray("files");
-                        if (files != null && !files.isEmpty()) {
-                            // Find primary file
-                            for (JsonElement fileElement : files) {
-                                JsonObject file = fileElement.getAsJsonObject();
-                                if (file.get("primary").getAsBoolean()) {
-                                    JsonObject hashes = file.getAsJsonObject("hashes");
-                                    if (hashes != null && hashes.has("sha512")) {
-                                        return hashes.get("sha512").getAsString();
-                                    }
+                if (version.equals(versionNumber)) {
+                    JsonArray files = versionObj.getAsJsonArray("files");
+                    if (files != null && !files.isEmpty()) {
+                        // Find primary file
+                        for (JsonElement fileElement : files) {
+                            JsonObject file = fileElement.getAsJsonObject();
+                            if (file.get("primary").getAsBoolean()) {
+                                JsonObject hashes = file.getAsJsonObject("hashes");
+                                if (hashes != null && hashes.has("sha512")) {
+                                    return hashes.get("sha512").getAsString();
                                 }
                             }
-                            // Fallback to first file
-                            JsonObject file = files.get(0).getAsJsonObject();
-                            JsonObject hashes = file.getAsJsonObject("hashes");
-                            if (hashes != null && hashes.has("sha512")) {
-                                return hashes.get("sha512").getAsString();
-                            }
+                        }
+                        // Fallback to first file
+                        JsonObject file = files.get(0).getAsJsonObject();
+                        JsonObject hashes = file.getAsJsonObject("hashes");
+                        if (hashes != null && hashes.has("sha512")) {
+                            return hashes.get("sha512").getAsString();
                         }
                     }
                 }

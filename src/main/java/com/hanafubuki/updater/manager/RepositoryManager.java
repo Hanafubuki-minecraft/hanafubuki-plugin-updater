@@ -14,6 +14,7 @@ import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.ExecutorService;
+import java.util.concurrent.atomic.AtomicLong;
 
 import org.bukkit.Bukkit;
 import org.bukkit.ChatColor;
@@ -47,6 +48,16 @@ public class RepositoryManager {
     
     // Cache for plugin name -> JAR path mapping
     private final Map<String, Path> pluginJarCache = new ConcurrentHashMap<>();
+    
+    // Metrics counters
+    private final AtomicLong checksTotal = new AtomicLong(0);
+    private final AtomicLong updatesFound = new AtomicLong(0);
+    private final AtomicLong downloadsSuccess = new AtomicLong(0);
+    private final AtomicLong downloadsFailed = new AtomicLong(0);
+    private final AtomicLong errors = new AtomicLong(0);
+    
+    // Dry-run mode flag
+    private boolean dryRun = false;
     
     public RepositoryManager(ExecutorService executorService) {
         this.executorService = executorService;
@@ -89,12 +100,21 @@ public class RepositoryManager {
         int githubApiTimeout = configManager.getGitHubApiTimeout();
         int githubDownloadTimeout = configManager.getGitHubDownloadTimeout();
         
-        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService, modrinthApiTimeout, modrinthDownloadTimeout, this.updateFolderName);
+        // Get retry settings
+        int modrinthMaxRetries = configManager.getModrinthMaxRetries();
+        int modrinthBaseDelayMs = configManager.getModrinthBaseDelayMs();
+        int modrinthMaxDelayMs = configManager.getModrinthMaxDelayMs();
+        
+        int githubMaxRetries = configManager.getGitHubMaxRetries();
+        int githubBaseDelayMs = configManager.getGitHubBaseDelayMs();
+        int githubMaxDelayMs = configManager.getGitHubMaxDelayMs();
+        
+        this.modrinthHandler = new ModrinthSourceHandler(httpClient, this.serverVersion, pluginVersion, logger, executorService, modrinthApiTimeout, modrinthDownloadTimeout, this.updateFolderName, modrinthMaxRetries, modrinthBaseDelayMs, modrinthMaxDelayMs);
         
         // Get GitHub token from config if available
         String githubToken = null;
         
-        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger, executorService, githubApiTimeout, githubDownloadTimeout, this.updateFolderName);
+        this.gitHubHandler = new GitHubSourceHandler(httpClient, githubToken, pluginVersion, logger, executorService, githubApiTimeout, githubDownloadTimeout, this.updateFolderName, githubMaxRetries, githubBaseDelayMs, githubMaxDelayMs);
     }
     
     /**
@@ -106,6 +126,8 @@ public class RepositoryManager {
     public CompletableFuture<?> updateFromModrinth(String pluginName, Map<String, Object> pluginDetails) {
         return CompletableFuture.runAsync(() -> {
             try {
+                checksTotal.incrementAndGet();
+                
                 // Find the installed JAR file
                 Path installedJarPath = findInstalledJar(pluginName);
                 if (installedJarPath == null) {
@@ -125,6 +147,7 @@ public class RepositoryManager {
                 }
                 
                 if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
+                    updatesFound.incrementAndGet();
                     plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
                     
                     // Get download URL
@@ -141,8 +164,15 @@ public class RepositoryManager {
                         return;
                     }
                     
+                    if (dryRun) {
+                        plugin.getLogger().info(String.format("[DRY-RUN] Would update %s: %s -> %s (URL: %s)", 
+                                pluginName, currentVersion, latestVersion, downloadUrl));
+                        return;
+                    }
+                    
                     // Download and install update
                     modrinthHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, expectedSha512);
+                    downloadsSuccess.incrementAndGet();
                     
                     plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
                     
@@ -157,6 +187,7 @@ public class RepositoryManager {
                     plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
                 }
             } catch (Exception e) {
+                errors.incrementAndGet();
                 plugin.getLogger().severe("Failed to update " + pluginName + " from Modrinth: " + e.getMessage());
                 e.printStackTrace();
             }
@@ -172,6 +203,8 @@ public class RepositoryManager {
     public CompletableFuture<?> updateFromGitHub(String pluginName, Map<String, Object> pluginDetails) {
         return CompletableFuture.runAsync(() -> {
             try {
+                checksTotal.incrementAndGet();
+                
                 // Find the installed JAR file
                 Path installedJarPath = findInstalledJar(pluginName);
                 if (installedJarPath == null) {
@@ -191,6 +224,7 @@ public class RepositoryManager {
                 }
                 
                 if (VersionUtils.isVersionNewer(latestVersion, currentVersion)) {
+                    updatesFound.incrementAndGet();
                     plugin.getLogger().info("New version available for " + pluginName + ": " + latestVersion);
                     
                     // Get download URL
@@ -200,8 +234,15 @@ public class RepositoryManager {
                         return;
                     }
                     
+                    if (dryRun) {
+                        plugin.getLogger().info(String.format("[DRY-RUN] Would update %s: %s -> %s (URL: %s)", 
+                                pluginName, currentVersion, latestVersion, downloadUrl));
+                        return;
+                    }
+                    
                     // Download and install update
                     gitHubHandler.downloadAndInstall(pluginName, downloadUrl, installedJarPath, pluginDetails);
+                    downloadsSuccess.incrementAndGet();
                     
                     plugin.getLogger().info("Successfully updated " + pluginName + " to version " + latestVersion);
                     
@@ -216,6 +257,8 @@ public class RepositoryManager {
                     plugin.getLogger().info("Plugin " + pluginName + " is up to date (current: " + currentVersion + ")");
                 }
             } catch (Exception e) {
+                downloadsFailed.incrementAndGet();
+                errors.incrementAndGet();
                 plugin.getLogger().severe("Failed to update " + pluginName + " from GitHub: " + e.getMessage());
                 e.printStackTrace();
             }
@@ -329,5 +372,75 @@ public class RepositoryManager {
             plugin.getLogger().warning("Failed to read update folder from bukkit.yml, using default 'update': " + e.getMessage());
             return "update";
         }
+    }
+    
+    /**
+     * Set dry-run mode
+     * @param dryRun true to enable dry-run mode
+     */
+    public void setDryRun(boolean dryRun) {
+        this.dryRun = dryRun;
+    }
+    
+    /**
+     * Check if dry-run mode is enabled
+     * @return true if dry-run mode is enabled
+     */
+    public boolean isDryRun() {
+        return dryRun;
+    }
+    
+    /**
+     * Get metrics as a map
+     * @return Map with metrics counters
+     */
+    public Map<String, Long> getMetrics() {
+        return Map.of(
+            "checks_total", checksTotal.get(),
+            "updates_found", updatesFound.get(),
+            "downloads_success", downloadsSuccess.get(),
+            "downloads_failed", downloadsFailed.get(),
+            "errors", errors.get()
+        );
+    }
+    
+    /**
+     * Get metrics in Prometheus format
+     * @return Prometheus formatted metrics string
+     */
+    public String getMetricsPrometheus() {
+        StringBuilder sb = new StringBuilder();
+        sb.append("# HELP hanafubuki_updater_checks_total Total number of version checks performed\n");
+        sb.append("# TYPE hanafubuki_updater_checks_total counter\n");
+        sb.append("hanafubuki_updater_checks_total ").append(checksTotal.get()).append("\n");
+        sb.append("# HELP hanafubuki_updater_updates_found Total number of updates found\n");
+        sb.append("# TYPE hanafubuki_updater_updates_found counter\n");
+        sb.append("hanafubuki_updater_updates_found ").append(updatesFound.get()).append("\n");
+        sb.append("# HELP hanafubuki_updater_downloads_success Total number of successful downloads\n");
+        sb.append("# TYPE hanafubuki_updater_downloads_success counter\n");
+        sb.append("hanafubuki_updater_downloads_success ").append(downloadsSuccess.get()).append("\n");
+        sb.append("# HELP hanafubuki_updater_downloads_failed Total number of failed downloads\n");
+        sb.append("# TYPE hanafubuki_updater_downloads_failed counter\n");
+        sb.append("hanafubuki_updater_downloads_failed ").append(downloadsFailed.get()).append("\n");
+        sb.append("# HELP hanafubuki_updater_errors Total number of errors\n");
+        sb.append("# TYPE hanafubuki_updater_errors counter\n");
+        sb.append("hanafubuki_updater_errors ").append(errors.get()).append("\n");
+        return sb.toString();
+    }
+    
+    /**
+     * Get the number of configured plugins being tracked
+     * @return Number of plugins in config
+     */
+    public int getPluginsTracked() {
+        return configManager.getPlugins().size();
+    }
+    
+    /**
+     * Get the last check timestamp (placeholder - could be enhanced)
+     * @return Current timestamp as last check time
+     */
+    public long getLastCheckTimestamp() {
+        return System.currentTimeMillis();
     }
 }

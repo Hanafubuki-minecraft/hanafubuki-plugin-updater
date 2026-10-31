@@ -202,6 +202,105 @@ public class ConfigManager {
         ConfigurationSection section = yaml.getConfigurationSection("console");
         return section != null ? section.getValues(false) : Map.of();
     }
+
+    /**
+     * Check if JSON format logging is enabled
+     * @return true if JSON format is enabled, false otherwise
+     */
+    public boolean getConsoleJsonFormat() {
+        return yaml.getBoolean("console.json_format", false);
+    }
+
+    /**
+     * Get Modrinth retry configuration
+     * @return Map with max_retries, base_delay_ms, max_delay_ms
+     */
+    public Map<String, Object> getModrinthRetryConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("modrinth.retry");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Get Modrinth max retries
+     * @return Max retries (default: 3)
+     */
+    public int getModrinthMaxRetries() {
+        return yaml.getInt("modrinth.retry.max_retries", 3);
+    }
+
+    /**
+     * Get Modrinth base delay in milliseconds
+     * @return Base delay in ms (default: 1000)
+     */
+    public int getModrinthBaseDelayMs() {
+        return yaml.getInt("modrinth.retry.base_delay_ms", 1000);
+    }
+
+    /**
+     * Get Modrinth max delay in milliseconds
+     * @return Max delay in ms (default: 10000)
+     */
+    public int getModrinthMaxDelayMs() {
+        return yaml.getInt("modrinth.retry.max_delay_ms", 10000);
+    }
+
+    /**
+     * Get GitHub retry configuration
+     * @return Map with max_retries, base_delay_ms, max_delay_ms
+     */
+    public Map<String, Object> getGitHubRetryConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("github.retry");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Get GitHub max retries
+     * @return Max retries (default: 3)
+     */
+    public int getGitHubMaxRetries() {
+        return yaml.getInt("github.retry.max_retries", 3);
+    }
+
+    /**
+     * Get GitHub base delay in milliseconds
+     * @return Base delay in ms (default: 1000)
+     */
+    public int getGitHubBaseDelayMs() {
+        return yaml.getInt("github.retry.base_delay_ms", 1000);
+    }
+
+    /**
+     * Get GitHub max delay in milliseconds
+     * @return Max delay in ms (default: 10000)
+     */
+    public int getGitHubMaxDelayMs() {
+        return yaml.getInt("github.retry.max_delay_ms", 10000);
+    }
+
+    /**
+     * Get health check configuration
+     * @return Health check configuration map
+     */
+    public Map<String, Object> getHealthCheckConfig() {
+        ConfigurationSection section = yaml.getConfigurationSection("health_check");
+        return section != null ? section.getValues(false) : Map.of();
+    }
+
+    /**
+     * Check if health check endpoint is enabled
+     * @return true if enabled, false otherwise
+     */
+    public boolean isHealthCheckEnabled() {
+        return yaml.getBoolean("health_check.enabled", false);
+    }
+
+    /**
+     * Get health check port
+     * @return Port number (default: 8080)
+     */
+    public int getHealthCheckPort() {
+        return yaml.getInt("health_check.port", 8080);
+    }
     
     /**
      * Get commit message template

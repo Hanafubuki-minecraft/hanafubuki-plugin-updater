@@ -2,21 +2,27 @@ package com.hanafubuki.updater;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.OutputStream;
+import java.net.InetSocketAddress;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
-import org.bukkit.plugin.java.JavaPlugin;
 import org.bukkit.Bukkit;
 import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
 import org.bukkit.ChatColor;
+import org.bukkit.plugin.java.JavaPlugin;
 
 import com.hanafubuki.updater.config.ConfigManager;
 import com.hanafubuki.updater.manager.RepositoryManager;
 import com.hanafubuki.updater.util.VersionUtils;
+
+import com.sun.net.httpserver.HttpServer;
+import com.sun.net.httpserver.HttpHandler;
+import com.sun.net.httpserver.HttpExchange;
 
 /**
  * Main class for the Hanafubuki Plugin Updater
@@ -27,6 +33,7 @@ public class PluginUpdater extends JavaPlugin {
     private ConfigManager configManager;
     private RepositoryManager repositoryManager;
     private ExecutorService executorService;
+    private HttpServer healthCheckServer;
     
     @Override
     public void onEnable() {
@@ -43,11 +50,19 @@ public class PluginUpdater extends JavaPlugin {
             return;
         }
         
+        // Start health check endpoint if enabled
+        startHealthCheckEndpoint();
+        
         getLogger().info("Hanafubuki Plugin Updater enabled!");
     }
     
     @Override
     public void onDisable() {
+        // Stop health check server
+        if (healthCheckServer != null) {
+            healthCheckServer.stop(0);
+        }
+        
         if (executorService != null && !executorService.isShutdown()) {
             executorService.shutdown();
             try {
@@ -71,26 +86,210 @@ public class PluginUpdater extends JavaPlugin {
             }
             
             // Handle subcommands
-            if (args.length > 0 && args[0].equalsIgnoreCase("discover")) {
-                handleDiscoverCommand(sender, args);
-                return true;
+            if (args.length > 0) {
+                String subCommand = args[0].toLowerCase();
+                
+                if (subCommand.equals("discover")) {
+                    handleDiscoverCommand(sender, args);
+                    return true;
+                } else if (subCommand.equals("reload")) {
+                    handleReloadCommand(sender);
+                    return true;
+                } else if (subCommand.equals("metrics")) {
+                    handleMetricsCommand(sender, args);
+                    return true;
+                } else if (subCommand.equals("--dry-run") || subCommand.equals("dry-run")) {
+                    // Run update process in dry-run mode
+                    handleDryRunCommand(sender);
+                    return true;
+                }
             }
+            
+            // Check for --dry-run flag anywhere in args
+            boolean dryRunFlag = false;
+            for (String arg : args) {
+                if (arg.equalsIgnoreCase("--dry-run") || arg.equalsIgnoreCase("-d")) {
+                    dryRunFlag = true;
+                    break;
+                }
+            }
+            
+            final boolean dryRun = dryRunFlag;
             
             // Run update process asynchronously
             CompletableFuture.runAsync(() -> {
                 try {
+                    if (dryRun) {
+                        repositoryManager.setDryRun(true);
+                        getLogger().info("Starting plugin update process in DRY-RUN mode");
+                    }
                     performUpdates();
                 } catch (Exception e) {
                     getLogger().severe("Error during plugin updates: " + e.getMessage());
                     e.printStackTrace();
+                } finally {
+                    repositoryManager.setDryRun(false);
                 }
             });
             
-            sender.sendMessage(ChatColor.GREEN + "Plugin update process started in background.");
+            String message = dryRun 
+                ? ChatColor.YELLOW + "Plugin update process started in DRY-RUN mode (no changes will be made)."
+                : ChatColor.GREEN + "Plugin update process started in background.";
+            sender.sendMessage(message);
             return true;
         }
         
         return false;
+    }
+    
+    /**
+     * Handle the /updateplugins --dry-run command
+     */
+    private void handleDryRunCommand(CommandSender sender) {
+        sender.sendMessage(ChatColor.YELLOW + "Starting plugin update check in DRY-RUN mode...");
+        
+        CompletableFuture.runAsync(() -> {
+            try {
+                repositoryManager.setDryRun(true);
+                getLogger().info("Starting plugin update process in DRY-RUN mode");
+                performUpdates();
+            } catch (Exception e) {
+                getLogger().severe("Error during plugin updates: " + e.getMessage());
+                e.printStackTrace();
+            } finally {
+                repositoryManager.setDryRun(false);
+            }
+        });
+        
+        sender.sendMessage(ChatColor.YELLOW + "DRY-RUN update check started. Check console for what would be updated.");
+    }
+    
+    /**
+     * Handle the /updateplugins reload command
+     */
+    private void handleReloadCommand(CommandSender sender) {
+        try {
+            // Reload config
+            configManager.loadConfig(getDataFolder());
+            
+            // Recreate RepositoryManager with new settings
+            // Shutdown old executor and create new one
+            if (executorService != null && !executorService.isShutdown()) {
+                executorService.shutdown();
+                try {
+                    if (!executorService.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
+                        executorService.shutdownNow();
+                    }
+                } catch (InterruptedException e) {
+                    executorService.shutdownNow();
+                    Thread.currentThread().interrupt();
+                }
+            }
+            
+            this.executorService = Executors.newFixedThreadPool(4);
+            this.repositoryManager = new RepositoryManager(executorService);
+            
+            // Restart health check endpoint with new config
+            startHealthCheckEndpoint();
+            
+            getLogger().info("Configuration reloaded successfully");
+            sender.sendMessage(ChatColor.GREEN + "Configuration reloaded successfully!");
+            sender.sendMessage(ChatColor.GRAY + "Updated settings: include_only=" + configManager.getIncludeOnlyMode() + 
+                    ", json_format=" + configManager.getConsoleJsonFormat() + 
+                    ", health_check=" + configManager.isHealthCheckEnabled());
+            
+        } catch (IOException e) {
+            getLogger().severe("Failed to reload configuration: " + e.getMessage());
+            e.printStackTrace();
+            sender.sendMessage(ChatColor.RED + "Failed to reload configuration: " + e.getMessage());
+        }
+    }
+    
+    /**
+     * Handle the /updateplugins metrics command
+     */
+    private void handleMetricsCommand(CommandSender sender, String[] args) {
+        boolean prometheus = false;
+        for (int i = 1; i < args.length; i++) {
+            if (args[i].equalsIgnoreCase("--prometheus") || args[i].equalsIgnoreCase("-p")) {
+                prometheus = true;
+                break;
+            }
+        }
+        
+        Map<String, Long> metrics = repositoryManager.getMetrics();
+        
+        if (prometheus) {
+            String prometheusOutput = repositoryManager.getMetricsPrometheus();
+            sender.sendMessage(ChatColor.GOLD + "=== Metrics (Prometheus format) ===");
+            for (String line : prometheusOutput.split("\n")) {
+                if (!line.startsWith("#")) {
+                    sender.sendMessage(ChatColor.WHITE + line);
+                }
+            }
+        } else {
+            sender.sendMessage(ChatColor.GOLD + "=== Hanafubuki Plugin Updater Metrics ===");
+            sender.sendMessage(ChatColor.YELLOW + "  Checks total: " + ChatColor.WHITE + metrics.get("checks_total"));
+            sender.sendMessage(ChatColor.YELLOW + "  Updates found: " + ChatColor.WHITE + metrics.get("updates_found"));
+            sender.sendMessage(ChatColor.YELLOW + "  Downloads successful: " + ChatColor.WHITE + metrics.get("downloads_success"));
+            sender.sendMessage(ChatColor.YELLOW + "  Downloads failed: " + ChatColor.WHITE + metrics.get("downloads_failed"));
+            sender.sendMessage(ChatColor.YELLOW + "  Errors: " + ChatColor.WHITE + metrics.get("errors"));
+            sender.sendMessage(ChatColor.YELLOW + "  Plugins tracked: " + ChatColor.WHITE + repositoryManager.getPluginsTracked());
+        }
+    }
+    
+    /**
+     * Start the health check HTTP endpoint if enabled in config
+     */
+    private void startHealthCheckEndpoint() {
+        // Stop existing server if running
+        if (healthCheckServer != null) {
+            healthCheckServer.stop(0);
+            healthCheckServer = null;
+        }
+        
+        if (!configManager.isHealthCheckEnabled()) {
+            getLogger().info("Health check endpoint disabled in config");
+            return;
+        }
+        
+        int port = configManager.getHealthCheckPort();
+        try {
+            healthCheckServer = HttpServer.create(new InetSocketAddress(port), 0);
+            healthCheckServer.createContext("/health", new HealthCheckHandler());
+            healthCheckServer.setExecutor(executorService);
+            healthCheckServer.start();
+            getLogger().info("Health check endpoint started on port " + port);
+        } catch (IOException e) {
+            getLogger().severe("Failed to start health check endpoint on port " + port + ": " + e.getMessage());
+            e.printStackTrace();
+        }
+    }
+    
+    /**
+     * HTTP handler for health check endpoint
+     */
+    private class HealthCheckHandler implements HttpHandler {
+        @Override
+        public void handle(HttpExchange exchange) throws IOException {
+            if (!"GET".equals(exchange.getRequestMethod())) {
+                exchange.sendResponseHeaders(405, -1); // Method Not Allowed
+                return;
+            }
+            
+            String response = String.format(
+                "{\"status\":\"UP\",\"version\":\"%s\",\"last_check\":%d,\"plugins_tracked\":%d}",
+                getPluginMeta().getVersion(),
+                repositoryManager.getLastCheckTimestamp(),
+                repositoryManager.getPluginsTracked()
+            );
+            
+            exchange.getResponseHeaders().set("Content-Type", "application/json");
+            exchange.sendResponseHeaders(200, response.getBytes().length);
+            try (OutputStream os = exchange.getResponseBody()) {
+                os.write(response.getBytes());
+            }
+        }
     }
     
     /**

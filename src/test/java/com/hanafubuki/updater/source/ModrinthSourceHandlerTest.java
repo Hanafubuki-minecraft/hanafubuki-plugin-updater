@@ -142,7 +142,7 @@ class ModrinthSourceHandlerTest {
     }
 
     private ModrinthSourceHandler createMinimalHandler(String serverVersion) throws Exception {
-        var constructor = ModrinthSourceHandler.class.getDeclaredConstructors()[0];
+        var constructor = ModrinthSourceHandler.class.getDeclaredConstructors()[1];
         constructor.setAccessible(true);
         return (ModrinthSourceHandler) constructor.newInstance(
             java.net.http.HttpClient.newHttpClient(),

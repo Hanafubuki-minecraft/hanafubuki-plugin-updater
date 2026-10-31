@@ -56,8 +56,8 @@ class GitHubSourceHandlerTest {
     }
 
     private GitHubSourceHandler createMinimalInstance() throws Exception {
-        // Use Constructor with all null args for testing
-        var constructor = GitHubSourceHandler.class.getDeclaredConstructors()[0];
+        // Use Constructor with all null args for testing - use the backward-compatible constructor (index 1)
+        var constructor = GitHubSourceHandler.class.getDeclaredConstructors()[1];
         constructor.setAccessible(true);
         return (GitHubSourceHandler) constructor.newInstance(
             null, null, "1.0.0", null, null, 10, 60, "update"

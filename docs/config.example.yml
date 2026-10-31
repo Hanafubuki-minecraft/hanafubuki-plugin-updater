@@ -12,6 +12,13 @@ global:
   # Maximum version that plugins can be updated to
   # Use "latest" or high version like "99.99.99" for no limit
   max_version: "99.99.99"
+  
+  # Auto-discover installed plugins not in config
+  # When true, discovered plugins can be added via /updateplugins discover
+  auto_discover: false
+  
+  # Auto-update config.yml with new versions after successful update
+  auto_update_config: true
 
 # ============================================
 # UPDATE MODES
@@ -51,6 +58,18 @@ modrinth:
   
   # Default game version filter (default: ["1.21.9"])
   # game_versions: ["1.21.9", "1.21.8"]
+  
+  # Retry configuration for failed requests
+  retry:
+    # Maximum number of retry attempts (default: 3)
+    max_retries: 3
+    
+    # Base delay in milliseconds (default: 1000)
+    # Actual delay = base_delay * 2^attempt + jitter
+    base_delay_ms: 1000
+    
+    # Maximum delay in milliseconds (default: 10000)
+    max_delay_ms: 10000
 
 # ============================================
 # GITHUB SETTINGS
@@ -71,6 +90,18 @@ github:
   
   # Default branch to check if no releases exist (default: "main")
   # default_branch: "main"
+  
+  # Retry configuration for failed requests
+  retry:
+    # Maximum number of retry attempts (default: 3)
+    max_retries: 3
+    
+    # Base delay in milliseconds (default: 1000)
+    # Actual delay = base_delay * 2^attempt + jitter
+    base_delay_ms: 1000
+    
+    # Maximum delay in milliseconds (default: 10000)
+    max_delay_ms: 10000
 
 # ============================================
 # CONSOLE OUTPUT SETTINGS
@@ -80,6 +111,10 @@ console:
   # Requires Paper/Adventure API
   mini_message: true
   
+  # Output as JSON lines instead of human-readable (default: false)
+  # Each line is a JSON object with: timestamp, level, plugin, action, version, duration_ms, error
+  json_format: false
+  
   # Color configuration for different message types
   # Use MiniMessage format: https://docs.advntr.dev/minimessage/format.html
   colors:
@@ -88,6 +123,17 @@ console:
     error: "<red><italic>"
     success: "<aqua><bold>"
     header: "<gradient:gold:yellow>"
+
+# ============================================
+# HEALTH CHECK SETTINGS
+# ============================================
+health_check:
+  # Enable HTTP health check endpoint (default: false)
+  enabled: false
+  
+  # Port to bind the health check endpoint (default: 8080)
+  # Only used when enabled: true
+  port: 8080
 
 # ============================================
 # PLUGIN LIST - Plugins to update
