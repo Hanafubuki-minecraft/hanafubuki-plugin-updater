@@ -132,7 +132,7 @@ public final class SettingsParser {
     private Schedule schedule() {
         Schedule d = Schedule.DISABLED;
         Schedule.Mode mode;
-        String modeText = string("schedule.mode", "off").toLowerCase(Locale.ROOT);
+        String modeText = mode("schedule.mode", "off").toLowerCase(Locale.ROOT);
         try {
             mode = Schedule.Mode.valueOf(modeText.toUpperCase(Locale.ROOT));
         } catch (IllegalArgumentException e) {
@@ -169,7 +169,7 @@ public final class SettingsParser {
     }
 
     private UpdaterSettings.DependencyMode dependencyMode() {
-        String m = string("dependencies.check", "block").toUpperCase(Locale.ROOT);
+        String m = mode("dependencies.check", "block").toUpperCase(Locale.ROOT);
         try {
             return UpdaterSettings.DependencyMode.valueOf(m);
         } catch (IllegalArgumentException e) {
@@ -333,6 +333,14 @@ public final class SettingsParser {
         }
         String s = String.valueOf(v).trim();
         return s.isEmpty() ? def : s;
+    }
+
+    /**
+     * A mode name such as off/warn/block. YAML 1.1 (SnakeYAML, Bukkit) reads an unquoted
+     * {@code off} as boolean false; that is turned back into "off".
+     */
+    private String mode(String path, String def) {
+        return Boolean.FALSE.equals(get(path)) ? "off" : string(path, def);
     }
 
     /** A secret: plain value or ${ENV_VAR}. */
