@@ -27,8 +27,17 @@ dependencies {
     // SnakeYAML for config parsing
     implementation("org.yaml:snakeyaml:2.7")
     
-    // JUnit for testing
-    testImplementation("org.junit.jupiter:junit-jupiter:6.1.3")
+    // JUnit for testing - use BOM for aligned versions
+    testImplementation(platform("org.junit:junit-bom:5.10.3"))
+    testImplementation("org.junit.jupiter:junit-jupiter")
+    testImplementation("org.junit.jupiter:junit-jupiter-params")
+    
+    // Mockito
+    testImplementation("org.mockito:mockito-core:5.12.0")
+    testImplementation("org.mockito:mockito-junit-jupiter:5.12.0")
+    
+    // Paper API for tests (needed for YamlConfiguration, etc.)
+    testImplementation("io.papermc.paper:paper-api:1.21.9-R0.1-SNAPSHOT")
 }
 
 java {

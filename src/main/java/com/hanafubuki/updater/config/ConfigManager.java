@@ -28,6 +28,12 @@ public class ConfigManager {
         this.plugin = PluginUpdater.getPlugin(PluginUpdater.class);
     }
     
+    // Package-private constructor for testing
+    ConfigManager(JavaPlugin plugin) {
+        this.yaml = new YamlConfiguration();
+        this.plugin = plugin;
+    }
+    
     /**
      * Load configuration from the plugin's data folder
      * @param dataFolder The plugin's data folder
@@ -37,7 +43,7 @@ public class ConfigManager {
         // Create config file if it doesn't exist
         File configFile = new File(dataFolder, "config.yml");
         
-        if (!configFile.exists()) {
+        if (!configFile.exists() && plugin != null) {
             // Copy default config from resources
             plugin.saveResource("config.yml", false);
         }
@@ -212,7 +218,7 @@ public class ConfigManager {
      * @return true if valid, false if invalid
      */
     public boolean validatePluginConfig(String pluginName, Map<String, Object> pluginDetails) {
-        Logger logger = plugin.getLogger();
+        Logger logger = plugin != null ? plugin.getLogger() : Logger.getLogger("ConfigManagerTest");
         
         // Check source field
         Object sourceObj = pluginDetails.get("source");
