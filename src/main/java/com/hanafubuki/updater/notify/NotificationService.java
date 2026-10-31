@@ -111,10 +111,22 @@ public final class NotificationService implements UpdateListener {
         });
     }
 
+    /** Stops accepting messages and waits up to 5 s for queued ones (used when the plugin is disabled). */
     public void shutdown() {
+        shutdown(5000);
+    }
+
+    /**
+     * Stops accepting messages. Queued messages are still sent; waits at most {@code waitMs}
+     * (0 = return at once, used on reload so the main thread never blocks).
+     */
+    public void shutdown(long waitMs) {
         executor.shutdown();
+        if (waitMs <= 0) {
+            return;
+        }
         try {
-            if (!executor.awaitTermination(5, TimeUnit.SECONDS)) {
+            if (!executor.awaitTermination(waitMs, TimeUnit.MILLISECONDS)) {
                 executor.shutdownNow();
             }
         } catch (InterruptedException e) {

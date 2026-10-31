@@ -68,7 +68,7 @@ public final class ResultReporter implements UpdateListener {
         } else {
             console(line(r));
             for (String note : r.notes()) {
-                console(messages.get().format("<warning>    ⚠ <note>", Messages.text("note", note)));
+                console(messages.get().format("<warning>    ! <note>", Messages.text("note", note)));
             }
             for (GitHubAdvisories.Alert a : r.alerts()) {
                 console(alertLine(r, a));
@@ -77,7 +77,7 @@ public final class ResultReporter implements UpdateListener {
         if (settings().notifications().inGame()) {
             if (r.status() == PluginResult.Status.UPDATED) {
                 notifyPlayers(messages.get().prefixed(
-                        "<success>Plugin <accent><plugin></accent> updated, try restarting</success> <muted>(<old> → <new>)",
+                        "<success>Plugin <accent><plugin></accent> updated, try restarting</success> <muted>(<old> -> <new>)",
                         Messages.text("plugin", r.plugin()), Messages.text("old", r.installedVersion()),
                         Messages.text("new", r.candidateVersion())));
             }
@@ -128,21 +128,21 @@ public final class ResultReporter implements UpdateListener {
         var candidate = Messages.text("candidate", r.candidateVersion());
         var message = Messages.text("message", r.message());
         return switch (r.status()) {
-            case UPDATED -> m.format("<success>  ✔ <plugin> <installed> → <candidate> staged, applied on next restart",
+            case UPDATED -> m.format("<success>  + <plugin> <installed> -> <candidate> staged, applied on next restart",
                     plugin, installed, candidate);
-            case AVAILABLE -> m.format("<accent>  ⬆ <plugin> <installed> → <candidate> available", plugin, installed, candidate);
-            case ALREADY_STAGED -> m.format("<muted>  … <plugin> <candidate> is staged and waits for a restart", plugin, candidate);
-            case UP_TO_DATE -> m.format("<muted>  • <plugin> <installed> is up to date", plugin, installed);
-            case NO_VERSION -> m.format("<muted>  • <plugin>: <message>", plugin, message);
+            case AVAILABLE -> m.format("<accent>  ^ <plugin> <installed> -> <candidate> available", plugin, installed, candidate);
+            case ALREADY_STAGED -> m.format("<muted>  ~ <plugin> <candidate> is staged and waits for a restart", plugin, candidate);
+            case UP_TO_DATE -> m.format("<muted>  = <plugin> <installed> is up to date", plugin, installed);
+            case NO_VERSION -> m.format("<muted>  = <plugin>: <message>", plugin, message);
             case SKIPPED -> m.format("<muted>  - <plugin> skipped: <message>", plugin, message);
-            case BLOCKED -> m.format("<warning>  ⛔ <plugin> <candidate> not installed: <message>", plugin, candidate, message);
-            case FAILED -> m.format("<error>  ✖ <plugin>: <message>", plugin, message);
+            case BLOCKED -> m.format("<warning>  ! <plugin> <candidate> not installed: <message>", plugin, candidate, message);
+            case FAILED -> m.format("<error>  x <plugin>: <message>", plugin, message);
             case CANCELLED -> m.format("<muted>  - <plugin> cancelled", plugin);
         };
     }
 
     private Component alertLine(PluginResult r, GitHubAdvisories.Alert a) {
-        return messages.get().format("<error>    ⚠ Security (<severity>) in <plugin> <installed>: <summary> "
+        return messages.get().format("<error>    ! Security (<severity>) in <plugin> <installed>: <summary> "
                         + "<muted>[<id>, patched: <patched>]",
                 Messages.text("severity", a.severity()), Messages.text("plugin", r.plugin()),
                 Messages.text("installed", r.installedVersion()), Messages.text("summary", a.summary()),

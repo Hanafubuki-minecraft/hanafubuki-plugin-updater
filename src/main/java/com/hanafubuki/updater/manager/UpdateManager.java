@@ -56,7 +56,7 @@ public final class UpdateManager {
     private final UpdateListener listener;
     private final Logger logger;
     private final Clock clock;
-    private final Metrics metrics = new Metrics();
+    private final Metrics metrics;
     private final AtomicReference<ActiveRun> active = new AtomicReference<>();
 
     /** Handle of a started run. */
@@ -71,6 +71,14 @@ public final class UpdateManager {
 
     public UpdateManager(Map<String, UpdateSource> sources, Installer installer, GitHubAdvisories advisories,
                          BackupManager backups, StateStore state, UpdateListener listener, Logger logger, Clock clock) {
+        this(sources, installer, advisories, backups, state, listener, logger, clock, new Metrics());
+    }
+
+    /** Same, but continues counting in existing metrics (used when config.yml is reloaded). */
+    public UpdateManager(Map<String, UpdateSource> sources, Installer installer, GitHubAdvisories advisories,
+                         BackupManager backups, StateStore state, UpdateListener listener, Logger logger, Clock clock,
+                         Metrics metrics) {
+        this.metrics = metrics;
         this.sources = Map.copyOf(sources);
         this.installer = installer;
         this.advisories = advisories;
@@ -391,11 +399,10 @@ public final class UpdateManager {
         if (!VersionUtils.isUnbounded(max) && VersionUtils.compare(candidate.version(), max) > 0) {
             return ctx.result(PluginResult.Status.SKIPPED, candidate.version(), candidate.version() + " is above max_version " + max);
         }
-        metrics.updatesFound.incrementAndGet();
-
         if (Files.exists(staged) && isAlreadyStaged(staged, candidate, stagedVersion)) {
             return ctx.result(PluginResult.Status.ALREADY_STAGED, candidate.version(), "waiting for a restart");
         }
+        metrics.updatesFound.incrementAndGet();
         if (dryRun) {
             return ctx.result(PluginResult.Status.AVAILABLE, candidate.version(), null);
         }

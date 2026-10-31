@@ -31,6 +31,7 @@ import com.hanafubuki.updater.http.HttpService;
 import com.hanafubuki.updater.http.RetryPolicy;
 import com.hanafubuki.updater.manager.BackupManager;
 import com.hanafubuki.updater.manager.Installer;
+import com.hanafubuki.updater.manager.Metrics;
 import com.hanafubuki.updater.manager.PluginResult;
 import com.hanafubuki.updater.manager.RunOptions;
 import com.hanafubuki.updater.manager.StateStore;
@@ -170,11 +171,11 @@ public final class PluginUpdater extends JavaPlugin {
             }
         };
         manager = new UpdateManager(sources, new Installer(http), advisories, backups, state, listener, getLogger(),
-                Clock.systemUTC());
+                Clock.systemUTC(), manager == null ? new Metrics() : manager.metrics());
         modrinth = modrinthSource;
         notifications = newNotifications;
         if (oldNotifications != null) {
-            oldNotifications.shutdown();
+            oldNotifications.shutdown(0);
         }
     }
 
@@ -301,7 +302,7 @@ public final class PluginUpdater extends JavaPlugin {
                     : "<warning><name> is not installed or already in config.yml.", Messages.text("name", only));
             return;
         }
-        messages.send(sender, "<primary>Looking up <accent><count></accent> plugins…", Messages.text("count", candidates.size()));
+        messages.send(sender, "<primary>Looking up <accent><count></accent> plugins...", Messages.text("count", candidates.size()));
         ModrinthSource lookup = modrinth;
         background.execute(() -> {
             List<PluginDiscovery.Suggestion> suggestions;
@@ -323,7 +324,7 @@ public final class PluginUpdater extends JavaPlugin {
             runSync(() -> {
                 for (PluginDiscovery.Suggestion s : suggestions) {
                     if (s.isUsable()) {
-                        messages.sendLine(sender, "<success>  + <name> <muted><version></muted> → <accent><source></accent> <muted><options> (<reason>)",
+                        messages.sendLine(sender, "<success>  + <name> <muted><version></muted> -> <accent><source></accent> <muted><options> (<reason>)",
                                 Messages.text("name", s.name()), Messages.text("version", s.version()),
                                 Messages.text("source", s.source()), Messages.text("options", s.options()),
                                 Messages.text("reason", s.reason()));
@@ -336,9 +337,6 @@ public final class PluginUpdater extends JavaPlugin {
                 if (add) {
                     messages.send(sender, "<primary>Added <accent><count></accent> plugins to config.yml.",
                             Messages.text("count", addedCount));
-                    if (addedCount > 0) {
-                        buildServices();
-                    }
                 } else {
                     messages.send(sender, "<muted>Run <accent>/updateplugins discover add</accent> to add the usable ones.");
                 }

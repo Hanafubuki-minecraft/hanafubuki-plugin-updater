@@ -155,8 +155,8 @@ public final class UpdateCommand implements TabExecutor {
         }
         String what = options.only() == null ? "all configured plugins" : String.join(", ", options.only());
         m().send(sender, options.dryRun()
-                        ? "<primary>Checking <accent><what></accent> for updates (nothing is downloaded)…"
-                        : "<primary>Updating <accent><what></accent> in the background…",
+                        ? "<primary>Checking <accent><what></accent> for updates (nothing is downloaded)..."
+                        : "<primary>Updating <accent><what></accent> in the background...",
                 Messages.text("what", what));
     }
 
@@ -176,7 +176,7 @@ public final class UpdateCommand implements TabExecutor {
 
     private boolean stop(CommandSender sender) {
         if (plugin.manager().cancel()) {
-            m().send(sender, "<warning>Stopping the running check…");
+            m().send(sender, "<warning>Stopping the running check...");
         } else {
             m().send(sender, "<muted>No check is running.");
         }
@@ -199,7 +199,7 @@ public final class UpdateCommand implements TabExecutor {
             m.sendLine(sender, "<muted>  No updates are waiting for a restart.");
         } else {
             m.sendLine(sender, "<warning>  Waiting for restart:");
-            staged.forEach((name, version) -> m.sendLine(sender, "<accent>    <name> → <version>",
+            staged.forEach((name, version) -> m.sendLine(sender, "<accent>    <name> -> <version>",
                     Messages.text("name", name), Messages.text("version", version)));
         }
         boolean discord = plugin.settings().notifications().discord().enabled();
@@ -370,7 +370,7 @@ public final class UpdateCommand implements TabExecutor {
             }
             return true;
         }
-        m().send(sender, "<primary>Counters since the last start or reload:");
+        m().send(sender, "<primary>Counters since the server started:");
         plugin.manager().metrics().snapshot().forEach((k, v) -> m().sendLine(sender, "<muted>  <key>: <accent><value>",
                 Messages.text("key", k.replace('_', ' ')), Messages.text("value",
                         k.endsWith("timestamp_ms") ? (v == 0 ? "never" : TIME.format(Instant.ofEpochMilli(v))) : v)));

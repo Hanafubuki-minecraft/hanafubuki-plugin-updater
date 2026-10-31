@@ -221,7 +221,7 @@ public final class UpdaterMenu implements InventoryHolder {
             plugin.messages().send(player, "<warning>A check is already running.");
             return;
         }
-        plugin.messages().send(player, options.dryRun() ? "<primary>Checking for updates…" : "<primary>Updating in the background…");
+        plugin.messages().send(player, options.dryRun() ? "<primary>Checking for updates..." : "<primary>Updating in the background...");
     }
 
     // --- backups view ------------------------------------------------------------------------
@@ -314,6 +314,6 @@ public final class UpdaterMenu implements InventoryHolder {
         if (s == null) {
             return "-";
         }
-        return s.length() <= max ? s : s.substring(0, max - 1) + "…";
+        return s.length() <= max ? s : s.substring(0, max - 1) + "...";
     }
 }
