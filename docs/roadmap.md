@@ -1,109 +1,116 @@
 # Roadmap
 
-## Current Version (1.0.12)
+## Status in 1.5.0
 
-### Implemented Features
-- ✅ Modrinth plugin updates with SHA-512 hash identification
-- ✅ GitHub releases plugin updates
-- ✅ Dual update modes: include-only and exclude-list
-- ✅ Global and per-plugin version filtering (min/max)
-- ✅ Async network I/O (CompletableFuture)
-- ✅ Safe installation to Bukkit update folder
-- ✅ SHA-512 verification for Modrinth downloads
-- ✅ plugin.yml name verification for both sources
-- ✅ MiniMessage console output styling
-- ✅ Operator notifications on update
-- ✅ Configuration via YAML with example file
+Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
 
-### Known Limitations
-- GitHub downloads lack hash verification (only plugin.yml name check)
-- No hot-reload for config changes (requires restart or command re-run)
-- Single-threaded update checks per source (sequential within source)
-- No webhook/Discord notification integration
-- No dry-run / preview mode
+### v1.1 – Reliability and observability
 
-## Planned Features
+- [x] Dry run: `/updateplugins check`, `/updateplugins --dry-run`, `update --dry-run`, `schedule.check_only`
+- [x] JSON log lines (`console.json_format`)
+- [x] Metrics: `/updateplugins metrics`, Prometheus output, `/metrics` endpoint
+- [x] Health endpoint (`health_check`, `GET /health`)
+- [x] Config reload: `/updateplugins reload`
+- [x] Retries with exponential backoff, jitter and `Retry-After`
 
-### v1.1 - Reliability & Observability
-- [ ] **Dry-run mode**: `/updateplugins --dry-run` to preview updates without downloading
-- [ ] **Structured logging**: JSON log output option for log aggregation
-- [ ] **Metrics**: Update check success/failure counts, duration histograms
-- [ ] **Health check endpoint**: For monitoring systems
-- [ ] **Config hot-reload**: `/updateplugins reload` to reload config without restart
-- [ ] **Retry logic**: Exponential backoff for transient API failures
+### v1.2 – More sources
 
-### v1.2 - Enhanced Sources
-- [ ] **Hangar support**: PaperMC's official plugin repository
-- [ ] **SpigotMC support**: Legacy but still used
-- [ ] **Local file source**: Update from local filesystem/network share
-- [ ] **Custom HTTP source**: Generic REST endpoint with JSON config
+- [x] Hangar
+- [x] SpigotMC (via Spiget)
+- [x] Local folder / network share
+- [x] Custom JSON endpoint
 
-### v1.3 - GitHub Security Hardening
-- [ ] **Release asset checksums**: Parse SHA-256/SHA-512 from release body or separate checksum file
-- [ ] **Signed commits verification**: Verify GitHub release commit signatures
-- [ ] **Dependabot-style alerts**: Notify when plugin has known vulnerabilities (via GitHub Advisory Database)
+### v1.3 – GitHub security
 
-### v1.4 - Notifications & Integration
-- [ ] **Discord webhook**: Send update notifications to Discord channel
-- [ ] **Webhook generic**: POST JSON to configurable URL on update
-- [ ] **In-game GUI**: `/updateplugins gui` for visual update management
-- [ ] **Scheduled checks**: Configurable automatic update checks (daily/weekly)
+- [x] Release asset checksums: GitHub's asset digest, sidecar files, checksum lists, release notes
+- [x] Signature verification of the release tag or its commit (`signatures: off | warn | require`)
+- [x] Security advisories for every entry with `repo` (`github.advisories`)
 
-### v1.5 - Advanced Features
-- [ ] **Rollback support**: Keep previous JAR version, command to revert
-- [ ] **Dependency awareness**: Check if updated plugin breaks dependencies
-- [ ] **Bulk operations**: Update all / update selected via command
-- [ ] **Plugin profiling**: Track which plugins update frequently vs rarely
+### v1.4 – Notifications and integration
 
-## Architecture Improvements
+- [x] Discord webhook (events, username, avatar, role mention)
+- [x] Generic JSON webhook with custom headers
+- [x] In-game GUI: `/updateplugins gui`
+- [x] Scheduled checks: interval, daily, weekly, on startup
 
-### Refactoring
-- [ ] **Source interface**: Extract `SourceHandler` interface for easier extension
-- [ ] **Plugin discovery**: Auto-detect installed plugins and suggest config entries
-- [ ] **State persistence**: Track last check time, last version seen per plugin
-- [ ] **Cancellation**: Support cancelling long-running update checks
+### v1.5 – Advanced features
 
-### Testing
-- [ ] **Unit tests**: VersionUtils, ConfigManager parsing
-- [ ] **Integration tests**: Mock Modrinth/GitHub API responses
-- [ ] **Contract tests**: Verify API compatibility
+- [x] Rollback: backups before every update, `/updateplugins backups`, `rollback`, `unstage`, GUI backups view
+- [x] Dependency awareness: missing hard dependencies and too new `api-version` (`dependencies.check`)
+- [x] Bulk operations: update all, or `update <plugin> <plugin> …`, from command and GUI
+- [x] Profiling / statistics: checks, updates, failures, average update interval (`/updateplugins stats`)
+- [x] State persistence: `state.json`
+- [x] Cancellation: `/updateplugins stop` interrupts network calls
+- [x] Connection pooling: one shared HTTP client
+- [x] ETag / Last-Modified caching
+- [x] Unit and integration tests against a local HTTP server; contract tests against the real APIs
 
-## Non-Functional Requirements
+### Architecture items
 
-### Performance
-- Target: Check 50 plugins in < 30 seconds
-- Parallel API requests across sources
-- Connection pooling for HTTP client
+- [x] Source interface (`UpdateSource`) for all six sources
+- [x] Plugin discovery with evidence (Modrinth hash, website) instead of guessing
 
-### Compatibility
-- Paper 1.21.x (current: 1.21.9)
-- Geyser/Floodgate (Bedrock compatibility)
-- ViaVersion (version protocol support)
-- Java 21 LTS
+## Changelog
 
-### Operational
-- Zero-downtime updates (restart required only for swap)
-- Idempotent operations (safe to run multiple times)
-- Clear error messages for operators
+### 1.5.0
 
-## Changelog Format
+The plugin was rewritten. Configs from 1.2.x keep working: the same sections and plugin entries are read,
+`console.colors` is still honoured, and invalid values are reported instead of breaking the plugin.
 
-All changes follow [Keep a Changelog](https://keepachangelog.com/) format:
-- `Added` for new features
-- `Changed` for changes in existing functionality
-- `Deprecated` for soon-to-be removed features
-- `Removed` for now removed features
-- `Fixed` for bug fixes
-- `Security` for vulnerability fixes
+**Added**
 
-## Release Process
+- Schedule (`schedule`), backups and rollback (`backups`, `rollback`, `unstage`, `backups` commands), dependency
+  check (`dependencies.check`), `state.json` with per-plugin statistics (`stats`), `status`, `stop`.
+- GitHub: asset checksums, signature verification, pre-releases, private repositories via token, security
+  advisories for any source.
+- Notifications: Discord, generic webhook, on-join reminders, `/updateplugins notify test`.
+- Inventory GUI (`/updateplugins gui`).
+- One permission node per sub-command (`hanafubuki.updater.*` tree), aliases `/pluginupdater` and `/hpu`.
+- `global.parallelism`, `global.max_download_mb`, `health_check.bind_address`.
+- `style` section with `primary`, `accent`, `success`, `warning`, `error`, `muted` and `prefix`.
+- `/metrics` Prometheus endpoint.
 
-1. Update version in `gradle.properties`
-2. `git commit -am "Release vX.Y.Z"`
-3. `git tag vX.Y.Z`
-4. `git push origin master --tags`
-5. GitHub Actions builds and publishes release
+**Changed**
 
-## Contributing
+- Modrinth: newer-or-not is decided by Modrinth publish dates when the installed file is known; versions
+  filtered by `version_types`.
+- `version` in plugin entries is informational; the installed version is read from the server.
+- Hangar: channel filter (`channel`, `"*"`), platform version ranges and `.x` wildcards.
+- Discovery adds only plugins with evidence; others are listed.
+- Default `download_timeout` raised from 60 to 120 seconds.
+- Gson, SnakeYAML and MiniMessage are used from Paper at runtime; only the Paper API is needed to compile.
 
-See `DEVELOPMENT.md` for build and contribution guidelines.
+**Fixed** (bugs of 1.2.2)
+
+- A dry run racing with a normal run could install updates; dry run is now an option of each run and only one
+  run can be active.
+- Redirects were never followed, so GitHub and SpigotMC downloads failed.
+- `json-path` was missing from the jar, so the custom source could not work; it now uses a built-in JSON path
+  subset.
+- `v`-prefixed tags such as `v2.1.0` were read as `0.0.0`.
+- The Spigot name search took the first search result; now only a unique exact match is accepted.
+- Auto-discovery added wrong sources.
+- Hangar checksums were never verified.
+- Credentials were sent to download hosts on other domains.
+- The health endpoint listened on all interfaces; it now binds to `127.0.0.1` by default.
+- Update notifications were broadcast to all players; now only to `hanafubuki.updater.notify`.
+- Config writes from parallel checks were not thread-safe.
+- The default `config.yml` was not valid YAML.
+
+**Security**
+
+- Cross-origin redirects drop all headers except `User-Agent` and `Accept`; `https` → `http` redirects are
+  refused; custom sources require `https` unless `allow_http: true`.
+- Size limits for downloads, API answers, descriptors and checksum files.
+
+## Future ideas
+
+Not implemented; listed so they are not forgotten.
+
+- Velocity / proxy support (updating proxy plugins, coordinated restarts).
+- Per-plugin schedules and per-plugin `check_only`.
+- Keeping the HTTP cache across restarts.
+- Installing missing dependencies of a new version automatically instead of blocking it.
+- Signature checks against pinned keys (GPG / Sigstore) instead of GitHub's "verified" flag.
+- Advisories from sources other than GitHub repository advisories.
+- A restart helper that tells players before a restart that applies staged updates.

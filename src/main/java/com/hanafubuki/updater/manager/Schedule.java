@@ -6,6 +6,7 @@ import java.time.LocalTime;
 import java.time.ZoneId;
 import java.time.ZonedDateTime;
 import java.time.temporal.TemporalAdjusters;
+import java.util.Locale;
 import java.util.Optional;
 
 /**
@@ -61,7 +62,7 @@ public record Schedule(Mode mode, Duration interval, LocalTime time, DayOfWeek d
             case OFF -> "off";
             case INTERVAL -> "every " + interval.toMinutes() + " min";
             case DAILY -> "daily at " + time + " " + zone.getId();
-            case WEEKLY -> "weekly on " + day.toString().toLowerCase() + " at " + time + " " + zone.getId();
+            case WEEKLY -> "weekly on " + day.toString().toLowerCase(Locale.ROOT) + " at " + time + " " + zone.getId();
         } + (dryRun ? " (check only)" : "");
     }
 }

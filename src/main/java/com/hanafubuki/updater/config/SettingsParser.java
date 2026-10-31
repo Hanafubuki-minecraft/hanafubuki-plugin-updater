@@ -142,6 +142,10 @@ public final class SettingsParser {
         Duration interval = Duration.ofMinutes(integer("schedule.interval_minutes", 360, 15, 10_080));
         LocalTime time = d.time();
         String timeText = string("schedule.time", "04:00");
+        if (get("schedule.time") instanceof Number n && n.intValue() >= 0 && n.intValue() < 24 * 60) {
+            // YAML 1.1 reads an unquoted 4:30 as the base-60 number 270.
+            timeText = String.format("%02d:%02d", n.intValue() / 60, n.intValue() % 60);
+        }
         try {
             time = LocalTime.parse(timeText.length() == 4 ? "0" + timeText : timeText);
         } catch (DateTimeException e) {
@@ -235,7 +239,11 @@ public final class SettingsParser {
                 copyColor(style, key, colors, key);
             }
         }
-        String prefix = string("style.prefix", "<gradient:#f9a8d4:#c4b5fd>Hanafubuki</gradient> <dark_gray>»</dark_gray> ");
+        // Not trimmed: the prefix usually ends with a space before the message.
+        Object rawPrefix = get("style.prefix");
+        String prefix = rawPrefix == null || rawPrefix instanceof Map<?, ?> || rawPrefix instanceof Collection<?>
+                ? "<gradient:#f9a8d4:#c4b5fd>Hanafubuki</gradient> <dark_gray>»</dark_gray> "
+                : String.valueOf(rawPrefix);
         return new UpdaterSettings.Style(prefix, colors);
     }
 

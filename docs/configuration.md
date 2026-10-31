@@ -94,7 +94,7 @@ next one is due, the new one is skipped and a line is logged.
 |---|---|---|---|
 | `mode` | `off` | `off`, `interval`, `daily`, `weekly` | When to run. |
 | `interval_minutes` | `360` | 15–10080 | `interval` mode: minutes between runs. The first run is one interval after the server start or reload. |
-| `time` | `"04:00"` | `HH:MM` (`4:00` works too) | `daily` / `weekly` mode: local time of the run. |
+| `time` | `"04:00"` | `HH:MM` (`4:00` and unquoted `4:30` work too) | `daily` / `weekly` mode: local time of the run. |
 | `day` | `monday` | `monday` … `sunday` | `weekly` mode: weekday. |
 | `timezone` | `""` | IANA zone id, e.g. `Europe/Moscow` | Zone for `time`. Empty = the server's (JVM) time zone. |
 | `check_on_startup` | `false` | bool | Run once per server start, after `startup_delay_seconds`. |
@@ -175,8 +175,8 @@ After each run `NotificationService` builds one message with one embed per event
 | `security` | one embed per advisory: severity, summary, patched versions, CVE, link | orange |
 | `summary` | "Update check finished on *server*": trigger, plugin count, duration, count per status | lavender |
 
-Nothing is sent when none of the configured events occurred. Discord allows 10 embeds per message, so a run
-with more is split into several messages; only the first one carries `mention`. `allowed_mentions` is set to
+Nothing is sent when none of the configured events occurred. Discord allows 10 embeds and 6000 characters of
+embed text per message, so a larger run is split into several messages; only the first one carries `mention`. `allowed_mentions` is set to
 roles and users, so `@everyone` / `@here` never ping. Sending happens on a separate thread with the default
 retry policy (3 retries); failures are logged and never affect updates.
 
