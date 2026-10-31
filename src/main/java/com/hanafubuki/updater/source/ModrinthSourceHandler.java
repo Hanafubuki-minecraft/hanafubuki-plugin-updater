@@ -4,9 +4,11 @@ import java.io.File;
 import java.io.FileInputStream;
 import java.io.IOException;
 import java.net.URI;
+import java.net.URLEncoder;
 import java.net.http.HttpClient;
 import java.net.http.HttpRequest;
 import java.net.http.HttpResponse;
+import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -68,6 +70,18 @@ public class ModrinthSourceHandler {
     }
     
     /**
+     * Build the versions API URL with proper URL encoding for query parameters.
+     * Modrinth API expects JSON arrays in query params, but square brackets must be URL-encoded.
+     */
+    private String buildVersionsUrl(String projectId) {
+        String loadersParam = URLEncoder.encode("[\"paper\"]", StandardCharsets.UTF_8);
+        String gameVersionsParam = URLEncoder.encode("[\"", StandardCharsets.UTF_8) 
+                + URLEncoder.encode(serverVersion, StandardCharsets.UTF_8) 
+                + URLEncoder.encode("\"]", StandardCharsets.UTF_8);
+        return baseUrl + "/project/" + projectId + "/version?loaders=" + loadersParam + "&game_versions=" + gameVersionsParam;
+    }
+    
+    /**
      * Get the latest version of a plugin from Modrinth
      * Uses explicit project_id from config or SHA-512 hash of installed JAR
      * @param pluginName Name of the plugin
@@ -86,7 +100,10 @@ public class ModrinthSourceHandler {
             }
             
             // Get project versions with filters for Paper and server version
-            String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=[\"paper\"]&game_versions=[\"" + serverVersion + "\"]";
+            // URL-encode the query parameters (square brackets must be encoded)
+            String loadersParam = URLEncoder.encode("[\"paper\"]", StandardCharsets.UTF_8);
+            String gameVersionsParam = URLEncoder.encode("[\"", StandardCharsets.UTF_8) + URLEncoder.encode(serverVersion, StandardCharsets.UTF_8) + URLEncoder.encode("\"]", StandardCharsets.UTF_8);
+            String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=" + loadersParam + "&game_versions=" + gameVersionsParam;
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
@@ -169,7 +186,7 @@ public class ModrinthSourceHandler {
             }
             
             // Get project versions and find the one matching our version
-            String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=[\"paper\"]&game_versions=[\"" + serverVersion + "\"]";
+            String versionsUrl = buildVersionsUrl(projectId);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
@@ -385,7 +402,7 @@ public class ModrinthSourceHandler {
                 throw new IOException("Could not determine project ID for plugin: " + pluginName);
             }
             
-            String versionsUrl = baseUrl + "/project/" + projectId + "/version?loaders=[\"paper\"]&game_versions=[\"" + serverVersion + "\"]";
+            String versionsUrl = buildVersionsUrl(projectId);
             HttpRequest request = HttpRequest.newBuilder()
                     .uri(URI.create(versionsUrl))
                     .timeout(Duration.ofSeconds(apiTimeoutSeconds))
