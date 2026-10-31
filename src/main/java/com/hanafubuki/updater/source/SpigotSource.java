@@ -10,6 +10,7 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Optional;
 
+import com.google.gson.JsonArray;
 import com.google.gson.JsonElement;
 import com.google.gson.JsonObject;
 import com.hanafubuki.updater.config.PluginEntry;
@@ -32,6 +33,9 @@ import com.hanafubuki.updater.util.Json;
 public final class SpigotSource implements UpdateSource {
 
     public static final String DEFAULT_BASE_URL = "https://api.spiget.org/v2";
+    private static final int SEARCH_PAGE_SIZE = 100;
+    /** Upper bound for name searches (2000 results); broader names must use resource_id. */
+    private static final int SEARCH_MAX_PAGES = 20;
 
     private final HttpService http;
     private final SourceSettings settings;
@@ -114,11 +118,22 @@ public final class SpigotSource implements UpdateSource {
         if (name == null) {
             throw new IOException("resource_id or resource_name is required");
         }
-        String body = getOk("/search/resources/" + encode(name) + "?field=name&size=25");
+        // Spiget pages search results; exact matches can be on any page, so all pages are read.
         List<JsonObject> exact = new ArrayList<>();
-        for (JsonElement e : Json.parseArray(body, "Spiget search")) {
-            if (e.isJsonObject() && name.equalsIgnoreCase(Json.str(e.getAsJsonObject(), "name"))) {
-                exact.add(e.getAsJsonObject());
+        for (int page = 1; ; page++) {
+            if (page > SEARCH_MAX_PAGES) {
+                throw new IOException("The SpigotMC search for '" + name + "' has too many results. Set resource_id instead");
+            }
+            String body = getOk("/search/resources/" + encode(name) + "?field=name&size=" + SEARCH_PAGE_SIZE
+                    + "&page=" + page + "&fields=id,name");
+            JsonArray results = Json.parseArray(body, "Spiget search");
+            for (JsonElement e : results) {
+                if (e.isJsonObject() && name.equalsIgnoreCase(Json.str(e.getAsJsonObject(), "name"))) {
+                    exact.add(e.getAsJsonObject());
+                }
+            }
+            if (results.size() < SEARCH_PAGE_SIZE) {
+                break;
             }
         }
         if (exact.size() == 1) {
