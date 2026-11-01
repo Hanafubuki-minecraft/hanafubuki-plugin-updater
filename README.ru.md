@@ -4,7 +4,7 @@
 
 **Держит все плагины на Paper-сервере свежими — безопасно, в фоне и не трогая работающие jar-файлы.**
 
-[![Build](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/actions/workflows/release.yml/badge.svg)](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/actions/workflows/release.yml)
+[![Build](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/actions/workflows/build.yml/badge.svg)](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/actions/workflows/build.yml)
 [![Release](https://img.shields.io/github/v/release/Hanafubuki-minecraft/hanafubuki-plugin-updater)](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
 [![License: GPL v3](https://img.shields.io/github/license/Hanafubuki-minecraft/hanafubuki-plugin-updater)](LICENSE)
 ![Paper](https://img.shields.io/badge/Paper-1.21.9-blue)
@@ -17,43 +17,76 @@
 ---
 
 Сделан для сервера **Hanafubuki**, но работает на любом Paper-сервере.
-Запускаете `/updateplugins` — новые версии скачиваются в `plugins/update/`, а Paper подменяет их при следующем рестарте.
+Новые версии скачиваются в папку обновлений Bukkit (`plugins/update/`) под именем установленного jar,
+а Paper подменяет их при следующем рестарте.
 
 ## Возможности
 
-- **Modrinth в первую очередь**: установленный jar определяется по SHA-512, а не поиском по имени, так что похожий проект не подсунуть.
-- **Релизы GitHub**: последний релиз, нужный файл выбирается по шаблону (`plugin-*.jar`).
-- **Другие источники**: [Hangar](https://hangar.papermc.io), SpigotMC (через Spiget), локальная или сетевая папка, любой JSON REST API с JSONPath.
-- **Безопасная установка**: скачивание в `plugins/update/<то же имя>.jar.part`, проверка хеша и `name` в `plugin.yml`, затем атомарное перемещение. Работающие jar никогда не перезаписываются.
-- **Полностью асинхронно**: весь сетевой I/O вне основного потока, плагины проверяются параллельно; при ошибках — повторы с нарастающей задержкой.
-- **Фильтры версий**: глобальные `min_version` / `max_version`, можно переопределить для каждого плагина; Modrinth фильтруется по загрузчику и версии игры.
-- **Два режима**: обновлять только `include_list` или всё, кроме `exclude_list` (исключения работают в обоих).
-- **Автообнаружение**: находит установленные плагины, которых нет в конфиге, и добавляет их.
-- **Пробный запуск**: показывает, что обновится, ничего не скачивая.
-- **Уведомление опов**: «Plugin X updated, try restarting», когда обновление поставлено в очередь.
-- **Наблюдаемость**: `/updateplugins metrics` (в том числе в формате Prometheus), JSON-логи и HTTP-эндпоинт `/health` по желанию.
+- **Modrinth в первую очередь** — установленный jar определяется по SHA-512, а не поиском по имени, так что похожий проект не подсунуть
+- **Релизы GitHub** — последний релиз или пре-релизы, нужный jar выбирается по шаблону (`EssentialsX-2*.jar`) и никогда не угадывается, контрольные суммы из digest GitHub, отдельных файлов или заметок к релизу, проверка подписи по желанию, приватные репозитории с токеном
+- **Другие источники** — [Hangar](https://hangar.papermc.io) (каналы, SHA-256), SpigotMC через Spiget, локальная или сетевая папка, любой JSON-эндпоинт с JSON-путями и авторизацией
+- **Безопасная установка** — скачивание во временный файл, проверка хеша, `name` плагина и его зависимостей, затем атомарное перемещение в `plugins/update/`. Работающие jar никогда не перезаписываются
+- **Резервные копии и откат** — старый jar сохраняется; `/updateplugins rollback` возвращает его при следующем рестарте
+- **Уязвимости** — GitHub security advisories для каждого плагина с `repo`, в консоли, в чате и в Discord
+- **Расписание** — каждые N минут, ежедневно или еженедельно в заданное время, при запуске или только проверка
+- **Уведомления** — «Plugin X updated, try restarting» для опов, напоминание при входе, вебхук Discord, общий JSON-вебхук
+- **GUI** — `/updateplugins gui`: состояние плагинов с первого взгляда, проверка / обновление / откат одним кликом
+- **Гибкие права** — отдельное право на каждую подкоманду, удобно для LuckPerms
+- **Полностью асинхронно** — весь сетевой I/O вне основного потока, плагины проверяются параллельно, повторы с нарастающей задержкой, отмена через `/updateplugins stop`
+- **Наблюдаемость** — статистика по каждому плагину, `/updateplugins metrics`, JSON-логи, эндпоинты `/health` и `/metrics` для Prometheus
 
 ## Установка
 
 1. Скачайте последний `.jar` из [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest).
-2. Положите его в `plugins/`.
-3. Перезапустите сервер — появится `plugins/HanafubukiPluginUpdater/config.yml`.
-4. Добавьте плагины в раздел `plugins:` (или выполните `/updateplugins discover --auto`).
-5. Выполните `/updateplugins` и перезапустите сервер, когда придёт уведомление.
+2. Положите его в `plugins/` и перезапустите сервер — появится `plugins/HanafubukiPluginUpdater/config.yml`.
+   Плагинов в нём пока нет.
+3. Добавьте плагины в раздел `plugins:` или выполните `/updateplugins discover`, а при
+   `global.auto_discover: true` — `/updateplugins discover add`.
+4. `/updateplugins reload`, затем `/updateplugins check`, чтобы увидеть, что изменится.
+5. `/updateplugins update` и рестарт, когда придёт уведомление.
 
 ## Команды
 
+`/updateplugins` — псевдонимы `/pluginupdater`, `/hpu`.
+
 | Команда | Описание | Право |
 |---|---|---|
-| `/updateplugins` | Проверить все плагины и скачать обновления | `hanafubuki.updater.update` (op) |
-| `/updateplugins dry-run` | Показать, что обновится, ничего не скачивая (также `--dry-run`, `-d`) | `hanafubuki.updater.update` |
-| `/updateplugins reload` | Перезагрузить `config.yml` | `hanafubuki.updater.update` |
-| `/updateplugins discover` | Список установленных плагинов, которых нет в конфиге | `hanafubuki.updater.update` |
-| `/updateplugins discover add [плагин]` | Добавить в конфиг все (или один) найденные плагины | `hanafubuki.updater.update` |
-| `/updateplugins discover --auto` | Запустить автообнаружение сейчас | `hanafubuki.updater.update` |
-| `/updateplugins metrics [--prometheus]` | Проверки, обновления, загрузки и ошибки с момента запуска | `hanafubuki.updater.update` |
+| `/updateplugins` | Обновить все плагины (то же, что `update`) | `hanafubuki.updater.update` |
+| `/updateplugins check [плагины…]` | Проверить обновления, ничего не скачивая (также `--dry-run`, `-d`, `dry-run`) | `hanafubuki.updater.check` |
+| `/updateplugins update [all\|плагины…] [--dry-run]` | Скачать обновления, применятся при рестарте | `hanafubuki.updater.update` |
+| `/updateplugins stop` | Остановить текущую проверку | `hanafubuki.updater.stop` |
+| `/updateplugins status` | Идёт ли проверка, ожидающие обновления, расписание, последний запуск | `hanafubuki.updater.status` |
+| `/updateplugins stats [плагин]` | Проверки, обновления, ошибки, средний интервал обновлений | `hanafubuki.updater.stats` |
+| `/updateplugins metrics [--prometheus]` | Счётчики с момента запуска сервера | `hanafubuki.updater.metrics` |
+| `/updateplugins backups <плагин>` | Список сохранённых прошлых версий | `hanafubuki.updater.rollback` |
+| `/updateplugins rollback <плагин> [версия]` | Вернуть прошлую версию при следующем рестарте | `hanafubuki.updater.rollback` |
+| `/updateplugins unstage <плагин>` | Убрать скачанное обновление до рестарта, снова включить обновления после отката | `hanafubuki.updater.rollback` |
+| `/updateplugins discover [add] [плагин]` | Найти установленные плагины, которых нет в конфиге (и добавить их) | `hanafubuki.updater.discover` |
+| `/updateplugins notify test` | Отправить тестовое сообщение в Discord / вебхук | `hanafubuki.updater.notifytest` |
+| `/updateplugins gui` | Открыть меню | `hanafubuki.updater.gui` |
+| `/updateplugins reload` | Перезагрузить `config.yml` | `hanafubuki.updater.reload` |
 
-Автодополнение работает для подкоманд и имён найденных плагинов.
+Каждой подкоманде нужно ещё право `hanafubuki.updater.use`. Автодополнение предлагает только то, что вам доступно.
+Подробнее и про GUI: [docs/index.md](docs/index.md).
+
+## Права
+
+Все права по умолчанию у опов; `hanafubuki.updater.*` даёт всё. Кроме прав из таблицы выше,
+`hanafubuki.updater.notify` получает в игре сообщения об обновлениях и уязвимостях.
+
+С LuckPerms:
+
+```text
+# модераторы могут проверять, но не устанавливать
+/lp group moderator permission set hanafubuki.updater.use true
+/lp group moderator permission set hanafubuki.updater.check true
+
+# всё одному игроку
+/lp user Steve permission set hanafubuki.updater.* true
+
+# забрать одно право у админов с опкой
+/lp group admin permission set hanafubuki.updater.update false
+```
 
 ## Настройка
 
@@ -61,49 +94,59 @@
 
 ```yaml
 global:
-  min_version: "1.0.0"
-  max_version: "99.99.99"
-  auto_discover: false
-  auto_discover_on_startup: false
-  auto_update_config: true     # записывать новую версию в конфиг после обновления
+  min_version: ""              # установленные версии ниже этой не трогаются
+  max_version: ""              # версии выше этой никогда не ставятся
+  auto_update_config: true     # записывать новую версию в запись плагина после обновления
+  parallelism: 4
 
 modes:
   include_only: false          # true = только плагины из include_list
   include_list: []
   exclude_list: []             # пропускаются в обоих режимах
 
-modrinth:
-  # loaders: ["paper"]
-  # game_versions: ["1.21.9"]
+schedule:
+  mode: daily                  # off | interval | daily | weekly
+  time: "04:30"
+  check_only: false
 
 github:
-  # token: "ghp_..."           # необязательно, повышает лимит запросов к API
+  token: "${GITHUB_TOKEN}"     # необязательно, берётся из переменной окружения
+
+notifications:
+  discord:
+    enabled: true
+    webhook_url: "${DISCORD_WEBHOOK_URL}"
 
 plugins:
-  "LuckPerms":
-    source: "modrinth"
-    version: "5.4.120"
-  "Floodgate":
-    source: "github"
-    version: "2.4.0"
-    repo: "GeyserMC/Floodgate"
-    asset_pattern: "floodgate-spigot.jar"
+  LuckPerms:
+    source: modrinth
+  ViaVersion:
+    source: hangar
+    project_slug: ViaVersion
+    repo: ViaVersion/ViaVersion   # включает проверку уязвимостей
+  ProtocolLib:
+    source: github
+    repo: dmulloy2/ProtocolLib
+    asset_pattern: "ProtocolLib.jar"
 ```
 
 ### Источники
 
-| `source` | Обязательные поля | Необязательные | Проверка |
+| `source` | Обязательно | Необязательно | Проверка |
 |---|---|---|---|
-| `modrinth` | `version` | `project_id` (ID или slug) | SHA-512 + имя в `plugin.yml` |
-| `github` | `version`, `repo` (`owner/repo`) | `asset_pattern` | имя в `plugin.yml` |
-| `hangar` | `version`, `project_slug` (`owner/slug`) | — | SHA-256 + имя в `plugin.yml` |
-| `spigotmc` | `version`, `resource_id` или `resource_name` | — | имя в `plugin.yml` (Spiget не отдаёт хеши) |
-| `local` | `version`, `path` (папка или файл) | `pattern`, `checksum` | SHA-256 / файлы `.sha256`, `.sha512` рядом + имя в `plugin.yml` |
-| `custom` | `version`, `url` | `version_path`, `download_url_path`, `checksum_path`, `headers`, `auth` | SHA-256 (если есть) + имя в `plugin.yml` |
+| `modrinth` | — | `project_id`, `loaders`, `game_versions`, `version_types` | SHA-512 |
+| `github` | `repo` (`owner/repo`) | `asset_pattern`, `include_prereleases`, `signatures` | digest GitHub / файл рядом / список сумм / заметки к релизу, если есть; подписи |
+| `hangar` | `project_slug` | `channel` | SHA-256 |
+| `spigotmc` | `resource_id` или `resource_name` | — | нет (Spiget не отдаёт хеши) |
+| `local` | `path` (папка или файл) | `pattern`, `checksum` | файл `.sha512` / `.sha256` / `.sha1` рядом или `checksum` |
+| `custom` | `url` | `version_path`, `download_url_path`, `checksum_path`, `checksum`, `headers`, `auth`, `allow_http` | сумма от эндпоинта, если есть |
 
-У каждого плагина можно задать свои `min_version` / `max_version`.
+Кроме того, любой скачанный файл должен быть jar-плагином с тем же `name`, что у установленного. В каждой записи
+можно задать `min_version`, `max_version` и `repo` (уязвимости с GitHub). `version` — только для справки;
+установленная версия берётся у сервера.
 
-Полный справочник со всеми параметрами и значениями по умолчанию: [`docs/config.example.yml`](docs/config.example.yml) и [`docs/configuration.md`](docs/configuration.md).
+Полный справочник: [docs/configuration.md](docs/configuration.md). Заполненный пример со всеми источниками:
+[docs/config.example.yml](docs/config.example.yml).
 
 ## Совместимость
 
@@ -112,15 +155,19 @@ plugins:
 | Paper 1.21.9 | ✅ Поддерживается |
 | Purpur, Pufferfish и другие форки Paper | ✅ Должно работать |
 | Geyser / Floodgate, ViaVersion | ✅ Поддерживаются (и могут им обновляться) |
-| Spigot / CraftBukkit | ❌ Не поддерживается |
+| Spigot / CraftBukkit | ❌ Не поддерживается (нужен Paper API) |
 
 ## Документация
 
-- [Архитектура](docs/architecture.md) — компоненты, поток данных, потоки
-- [Настройка](docs/configuration.md) — все параметры, режимы и фильтры версий
-- [API](docs/api.md) — как идут запросы к Modrinth и GitHub
+Документация на английском:
+
+- [Обзор](docs/index.md) — быстрый старт, команды, права, GUI
+- [Настройка](docs/configuration.md) — все параметры, источники, форматы уведомлений, health-эндпоинт
+- [Архитектура](docs/architecture.md) — компоненты, ход обновления, потоки, бэкапы и откат
+- [Источники и HTTP](docs/api.md) — как опрашивается и проверяется каждый источник
 - [Безопасность](docs/security.md) — модель угроз и проверки
-- [Разработка](docs/development.md) — сборка, тесты, релизы
+- [Разработка](docs/development.md) — сборка, тесты, CI, релизы
+- [Планы](docs/roadmap.md) — что готово, список изменений, идеи
 
 ## Сборка
 
@@ -137,7 +184,7 @@ plugins:
 Версия плагина хранится в одном месте — [`gradle.properties`](gradle.properties):
 
 ```properties
-version=1.2.2
+version=1.5.0
 ```
 
 Поднимите её и запушьте в `master` → GitHub Actions соберёт jar и опубликует релиз `v<version>` с автоматическими заметками.

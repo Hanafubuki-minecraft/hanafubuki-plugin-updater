@@ -1,688 +1,407 @@
 package com.hanafubuki.updater;
 
-import java.io.File;
 import java.io.IOException;
-import java.io.OutputStream;
-import java.net.InetSocketAddress;
+import java.nio.file.Path;
+import java.time.Clock;
+import java.time.Duration;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.concurrent.CompletableFuture;
+import java.util.Optional;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
+import java.util.concurrent.TimeUnit;
 
 import org.bukkit.Bukkit;
-import org.bukkit.command.Command;
 import org.bukkit.command.CommandSender;
-import org.bukkit.ChatColor;
+import org.bukkit.command.PluginCommand;
+import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
+import com.hanafubuki.updater.command.UpdateCommand;
 import com.hanafubuki.updater.config.ConfigManager;
-import com.hanafubuki.updater.manager.RepositoryManager;
-import com.hanafubuki.updater.util.VersionUtils;
-
-import com.sun.net.httpserver.HttpServer;
-import com.sun.net.httpserver.HttpHandler;
-import com.sun.net.httpserver.HttpExchange;
+import com.hanafubuki.updater.config.UpdaterSettings;
+import com.hanafubuki.updater.console.Messages;
+import com.hanafubuki.updater.console.ResultReporter;
+import com.hanafubuki.updater.discovery.PluginDiscovery;
+import com.hanafubuki.updater.gui.MenuListener;
+import com.hanafubuki.updater.health.HealthServer;
+import com.hanafubuki.updater.http.HttpCache;
+import com.hanafubuki.updater.http.HttpService;
+import com.hanafubuki.updater.http.RetryPolicy;
+import com.hanafubuki.updater.manager.BackupManager;
+import com.hanafubuki.updater.manager.Installer;
+import com.hanafubuki.updater.manager.Metrics;
+import com.hanafubuki.updater.manager.PluginResult;
+import com.hanafubuki.updater.manager.RunOptions;
+import com.hanafubuki.updater.manager.StateStore;
+import com.hanafubuki.updater.manager.UpdateListener;
+import com.hanafubuki.updater.manager.UpdateManager;
+import com.hanafubuki.updater.manager.UpdateReport;
+import com.hanafubuki.updater.notify.NotificationService;
+import com.hanafubuki.updater.source.CustomHttpSource;
+import com.hanafubuki.updater.source.GitHubAdvisories;
+import com.hanafubuki.updater.source.GitHubSource;
+import com.hanafubuki.updater.source.HangarSource;
+import com.hanafubuki.updater.source.LocalSource;
+import com.hanafubuki.updater.source.ModrinthSource;
+import com.hanafubuki.updater.source.UpdateSource;
 
 /**
- * Main class for the Hanafubuki Plugin Updater
- * This tool updates Minecraft server plugins from Modrinth and GitHub sources
+ * Hanafubuki Plugin Updater: keeps the server's plugins up to date from Modrinth, GitHub,
+ * Hangar, SpigotMC, local folders and custom endpoints.
+ *
+ * <p>All network and file work runs off the main thread. Updates are downloaded into the
+ * Bukkit update folder and applied by Paper on the next restart; running jars are never touched.
  */
-public class PluginUpdater extends JavaPlugin {
-    
-    private ConfigManager configManager;
-    private RepositoryManager repositoryManager;
-    private ExecutorService executorService;
-    private HttpServer healthCheckServer;
-    
+public final class PluginUpdater extends JavaPlugin {
+
+    private ConfigManager config;
+    private volatile Messages messages;
+    private HttpService http;
+    private StateStore state;
+    private BackupManager backups;
+    private volatile UpdateManager manager;
+    private volatile NotificationService notifications;
+    private volatile ModrinthSource modrinth;
+    private HealthServer health;
+    private UpdateScheduler scheduler;
+    private ExecutorService background;
+    private ResultReporter reporter;
+    private volatile UpdateReport lastReport;
+
     @Override
     public void onEnable() {
-        this.configManager = new ConfigManager();
-        this.executorService = Executors.newFixedThreadPool(4);
-        
-        // Register tab completer for /updateplugins
-        getCommand("updateplugins").setTabCompleter(new UpdatePluginsTabCompleter());
-        
-        // Load configuration FIRST
-        try {
-            configManager.loadConfig(getDataFolder());
-        } catch (IOException e) {
-            getLogger().severe("Failed to load configuration: " + e.getMessage());
-            e.printStackTrace();
+        config = new ConfigManager(this);
+        config.load();
+        messages = new Messages(config.settings().style());
+
+        background = Executors.newSingleThreadExecutor(r -> {
+            Thread t = new Thread(r, "HanafubukiUpdater-background");
+            t.setDaemon(true);
+            return t;
+        });
+        http = new HttpService(HttpService.newClient(Duration.ofSeconds(10)),
+                "ByteMe6/hanafubuki-plugin-updater/" + getPluginMeta().getVersion(),
+                RetryPolicy.DEFAULT, Thread::sleep, HttpCache.inMemory(512), getLogger());
+        state = new StateStore(getDataFolder().toPath().resolve("state.json"), getLogger());
+        backups = new BackupManager(getDataFolder().toPath().resolve("backups"));
+        reporter = new ResultReporter(this, config, () -> messages);
+        scheduler = new UpdateScheduler(this);
+
+        buildServices();
+
+        PluginCommand command = getCommand("updateplugins");
+        if (command == null) {
+            getLogger().severe("Command 'updateplugins' is missing from plugin.yml; disabling");
+            getServer().getPluginManager().disablePlugin(this);
             return;
         }
-        
-        // Then create RepositoryManager with loaded configManager
-        this.repositoryManager = new RepositoryManager(executorService, configManager);
-        
-        // Start health check endpoint if enabled
-        startHealthCheckEndpoint();
-        
-        // Run auto-discovery on startup if enabled
-        if (configManager.getAutoDiscoverOnStartup()) {
-            runAutoDiscoveryOnStartup();
+        UpdateCommand executor = new UpdateCommand(this);
+        command.setExecutor(executor);
+        command.setTabCompleter(executor);
+        getServer().getPluginManager().registerEvents(new MenuListener(), this);
+        getServer().getPluginManager().registerEvents(new JoinListener(this), this);
+
+        startHealthServer();
+        scheduler.start(config.settings().schedule());
+        if (config.settings().general().discoverOnStartup()) {
+            // Wait one tick so every plugin has finished enabling.
+            Bukkit.getScheduler().runTask(this, () -> discover(Bukkit.getConsoleSender(), true, null));
         }
-        
-        getLogger().info("Hanafubuki Plugin Updater enabled!");
+        getLogger().info("Tracking " + config.settings().plugins().size() + " plugins; schedule: "
+                + config.settings().schedule().describe());
     }
-    
+
     @Override
     public void onDisable() {
-        // Stop health check server
-        if (healthCheckServer != null) {
-            healthCheckServer.stop(0);
+        if (scheduler != null) {
+            scheduler.stop();
         }
-        
-        if (executorService != null && !executorService.isShutdown()) {
-            executorService.shutdown();
+        if (manager != null) {
+            manager.shutdown(5000);
+        }
+        stopHealthServer();
+        if (notifications != null) {
+            notifications.shutdown();
+        }
+        if (background != null) {
+            background.shutdownNow();
             try {
-                if (!executorService.awaitTermination(10, java.util.concurrent.TimeUnit.SECONDS)) {
-                    executorService.shutdownNow();
-                }
+                background.awaitTermination(3, TimeUnit.SECONDS);
             } catch (InterruptedException e) {
-                executorService.shutdownNow();
                 Thread.currentThread().interrupt();
             }
         }
-        getLogger().info("Hanafubuki Plugin Updater disabled!");
     }
-    
-    @Override
-    public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
-        if (command.getName().equalsIgnoreCase("updateplugins")) {
-            if (!sender.hasPermission("hanafubuki.updater.update")) {
-                sender.sendMessage(ChatColor.RED + "You don't have permission to use this command.");
-                return true;
+
+    /** (Re)creates sources and the update manager from the current settings. */
+    private void buildServices() {
+        UpdaterSettings s = config.settings();
+        ModrinthSource modrinthSource = new ModrinthSource(http, s.modrinth());
+        GitHubSource github = new GitHubSource(http, s.github());
+        Map<String, UpdateSource> sources = new LinkedHashMap<>();
+        sources.put("modrinth", modrinthSource);
+        sources.put("github", github);
+        sources.put("hangar", new HangarSource(http, s.hangar()));
+        sources.put("spigotmc", new com.hanafubuki.updater.source.SpigotSource(http, s.spigotmc()));
+        sources.put("local", new LocalSource());
+        sources.put("custom", new CustomHttpSource(http, s.custom()));
+        GitHubAdvisories advisories = new GitHubAdvisories(http.withRetry(s.github().source().retry()),
+                GitHubSource.DEFAULT_BASE_URL, githubHeaders(s), s.github().source().apiTimeout());
+
+        NotificationService oldNotifications = notifications;
+        NotificationService newNotifications = new NotificationService(s.notifications(), http.withRetry(RetryPolicy.DEFAULT), getLogger());
+        UpdateListener listener = new UpdateListener() {
+            @Override
+            public void onRunStarted(String trigger, boolean dryRun, int plugins) {
+                reporter.onRunStarted(trigger, dryRun, plugins);
             }
-            
-            // Handle subcommands
-            if (args.length > 0) {
-                String subCommand = args[0].toLowerCase();
-                
-                if (subCommand.equals("discover")) {
-                    handleDiscoverCommand(sender, args);
-                    return true;
-                } else if (subCommand.equals("reload")) {
-                    handleReloadCommand(sender);
-                    return true;
-                } else if (subCommand.equals("metrics")) {
-                    handleMetricsCommand(sender, args);
-                    return true;
-                } else if (subCommand.equals("--dry-run") || subCommand.equals("dry-run")) {
-                    // Run update process in dry-run mode
-                    handleDryRunCommand(sender);
-                    return true;
-                }
+
+            @Override
+            public void onPluginResult(PluginResult result) {
+                reporter.onPluginResult(result);
             }
-            
-            // Check for --dry-run flag anywhere in args
-            boolean dryRunFlag = false;
-            for (String arg : args) {
-                if (arg.equalsIgnoreCase("--dry-run") || arg.equalsIgnoreCase("-d")) {
-                    dryRunFlag = true;
-                    break;
-                }
+
+            @Override
+            public void onRunFinished(UpdateReport report) {
+                lastReport = report;
+                reporter.onRunFinished(report);
+                newNotifications.onRunFinished(report);
             }
-            
-            final boolean dryRun = dryRunFlag;
-            
-            // Run update process asynchronously
-            CompletableFuture.runAsync(() -> {
-                try {
-                    if (dryRun) {
-                        repositoryManager.setDryRun(true);
-                        getLogger().info("Starting plugin update process in DRY-RUN mode");
-                    }
-                    performUpdates();
-                } catch (Exception e) {
-                    getLogger().severe("Error during plugin updates: " + e.getMessage());
-                    e.printStackTrace();
-                } finally {
-                    repositoryManager.setDryRun(false);
-                }
-            });
-            
-            String message = dryRun 
-                ? ChatColor.YELLOW + "Plugin update process started in DRY-RUN mode (no changes will be made)."
-                : ChatColor.GREEN + "Plugin update process started in background.";
-            sender.sendMessage(message);
-            return true;
-        }
-        
-        return false;
-    }
-    
-    /**
-     * Handle the /updateplugins --dry-run command
-     */
-    private void handleDryRunCommand(CommandSender sender) {
-        sender.sendMessage(ChatColor.YELLOW + "Starting plugin update check in DRY-RUN mode...");
-        
-        CompletableFuture.runAsync(() -> {
-            try {
-                repositoryManager.setDryRun(true);
-                getLogger().info("Starting plugin update process in DRY-RUN mode");
-                performUpdates();
-            } catch (Exception e) {
-                getLogger().severe("Error during plugin updates: " + e.getMessage());
-                e.printStackTrace();
-            } finally {
-                repositoryManager.setDryRun(false);
-            }
-        });
-        
-        sender.sendMessage(ChatColor.YELLOW + "DRY-RUN update check started. Check console for what would be updated.");
-    }
-    
-    /**
-     * Handle the /updateplugins reload command
-     */
-    private void handleReloadCommand(CommandSender sender) {
-        try {
-            // Reload config
-            configManager.loadConfig(getDataFolder());
-            
-            // Recreate RepositoryManager with new settings
-            // Shutdown old executor and create new one
-            if (executorService != null && !executorService.isShutdown()) {
-                executorService.shutdown();
-                try {
-                    if (!executorService.awaitTermination(5, java.util.concurrent.TimeUnit.SECONDS)) {
-                        executorService.shutdownNow();
-                    }
-                } catch (InterruptedException e) {
-                    executorService.shutdownNow();
-                    Thread.currentThread().interrupt();
-                }
-            }
-            
-            this.executorService = Executors.newFixedThreadPool(4);
-            this.repositoryManager = new RepositoryManager(executorService, configManager);
-            
-            // Restart health check endpoint with new config
-            startHealthCheckEndpoint();
-            
-            getLogger().info("Configuration reloaded successfully");
-            sender.sendMessage(ChatColor.GREEN + "Configuration reloaded successfully!");
-            sender.sendMessage(ChatColor.GRAY + "Updated settings: include_only=" + configManager.getIncludeOnlyMode() + 
-                    ", json_format=" + configManager.getConsoleJsonFormat() + 
-                    ", health_check=" + configManager.isHealthCheckEnabled());
-            
-        } catch (IOException e) {
-            getLogger().severe("Failed to reload configuration: " + e.getMessage());
-            e.printStackTrace();
-            sender.sendMessage(ChatColor.RED + "Failed to reload configuration: " + e.getMessage());
+        };
+        manager = new UpdateManager(sources, new Installer(http), advisories, backups, state, listener, getLogger(),
+                Clock.systemUTC(), manager == null ? new Metrics() : manager.metrics());
+        modrinth = modrinthSource;
+        notifications = newNotifications;
+        if (oldNotifications != null) {
+            oldNotifications.shutdown(0);
         }
     }
-    
-    /**
-     * Handle the /updateplugins metrics command
-     */
-    private void handleMetricsCommand(CommandSender sender, String[] args) {
-        boolean prometheus = false;
-        for (int i = 1; i < args.length; i++) {
-            if (args[i].equalsIgnoreCase("--prometheus") || args[i].equalsIgnoreCase("-p")) {
-                prometheus = true;
-                break;
-            }
+
+    private static Map<String, String> githubHeaders(UpdaterSettings s) {
+        Map<String, String> h = new LinkedHashMap<>();
+        h.put("Accept", "application/vnd.github+json");
+        h.put("X-GitHub-Api-Version", "2022-11-28");
+        if (s.github().token() != null && !s.github().token().isBlank()) {
+            h.put("Authorization", "Bearer " + s.github().token());
         }
-        
-        Map<String, Long> metrics = repositoryManager.getMetrics();
-        
-        if (prometheus) {
-            String prometheusOutput = repositoryManager.getMetricsPrometheus();
-            sender.sendMessage(ChatColor.GOLD + "=== Metrics (Prometheus format) ===");
-            for (String line : prometheusOutput.split("\n")) {
-                if (!line.startsWith("#")) {
-                    sender.sendMessage(ChatColor.WHITE + line);
-                }
-            }
-        } else {
-            sender.sendMessage(ChatColor.GOLD + "=== Hanafubuki Plugin Updater Metrics ===");
-            sender.sendMessage(ChatColor.YELLOW + "  Checks total: " + ChatColor.WHITE + metrics.get("checks_total"));
-            sender.sendMessage(ChatColor.YELLOW + "  Updates found: " + ChatColor.WHITE + metrics.get("updates_found"));
-            sender.sendMessage(ChatColor.YELLOW + "  Downloads successful: " + ChatColor.WHITE + metrics.get("downloads_success"));
-            sender.sendMessage(ChatColor.YELLOW + "  Downloads failed: " + ChatColor.WHITE + metrics.get("downloads_failed"));
-            sender.sendMessage(ChatColor.YELLOW + "  Errors: " + ChatColor.WHITE + metrics.get("errors"));
-            sender.sendMessage(ChatColor.YELLOW + "  Plugins tracked: " + ChatColor.WHITE + repositoryManager.getPluginsTracked());
-        }
+        return h;
     }
-    
-    /**
-     * Start the health check HTTP endpoint if enabled in config
-     */
-    private void startHealthCheckEndpoint() {
-        // Stop existing server if running
-        if (healthCheckServer != null) {
-            healthCheckServer.stop(0);
-            healthCheckServer = null;
-        }
-        
-        if (!configManager.isHealthCheckEnabled()) {
-            getLogger().info("Health check endpoint disabled in config");
+
+    private void startHealthServer() {
+        UpdaterSettings.Health h = config.settings().health();
+        if (!h.enabled()) {
             return;
         }
-        
-        int port = configManager.getHealthCheckPort();
         try {
-            healthCheckServer = HttpServer.create(new InetSocketAddress(port), 0);
-            healthCheckServer.createContext("/health", new HealthCheckHandler());
-            healthCheckServer.setExecutor(executorService);
-            healthCheckServer.start();
-            getLogger().info("Health check endpoint started on port " + port);
-        } catch (IOException e) {
-            getLogger().severe("Failed to start health check endpoint on port " + port + ": " + e.getMessage());
-            e.printStackTrace();
+            health = HealthServer.start(h.bindAddress(), h.port(), this::healthStatus,
+                    () -> manager.metrics().prometheus(config.settings().plugins().size()));
+            getLogger().info("Health endpoint listening on http://" + h.bindAddress() + ":" + h.port() + "/health");
+        } catch (IOException | RuntimeException e) {
+            getLogger().severe("Could not start the health endpoint on " + h.bindAddress() + ":" + h.port() + ": " + e.getMessage());
         }
     }
-    
+
+    private void stopHealthServer() {
+        if (health != null) {
+            health.stop();
+            health = null;
+        }
+    }
+
+    private Map<String, Object> healthStatus() {
+        Map<String, Object> status = new LinkedHashMap<>();
+        status.put("status", "UP");
+        status.put("version", getPluginMeta().getVersion());
+        status.put("running", manager.isRunning());
+        status.put("plugins_tracked", config.settings().plugins().size());
+        status.put("staged_updates", state.allStaged().size());
+        state.lastRun().ifPresent(r -> {
+            Map<String, Object> last = new LinkedHashMap<>();
+            last.put("trigger", r.trigger());
+            last.put("dry_run", r.dryRun());
+            last.put("started", r.started() == null ? null : r.started().toString());
+            last.put("finished", r.finished() == null ? null : r.finished().toString());
+            last.put("cancelled", r.cancelled());
+            last.put("counts", r.counts());
+            status.put("last_run", last);
+        });
+        return status;
+    }
+
+    // --- operations used by commands, GUI and scheduler ---------------------------------------
+
     /**
-     * HTTP handler for health check endpoint
+     * Starts a run. Must be called on the main thread (reads the plugin list).
+     *
+     * @param requester gets the summary when the run ends; may be null
+     * @return false if a run is already active
      */
-    private class HealthCheckHandler implements HttpHandler {
-        @Override
-        public void handle(HttpExchange exchange) throws IOException {
-            if (!"GET".equals(exchange.getRequestMethod())) {
-                exchange.sendResponseHeaders(405, -1); // Method Not Allowed
+    public boolean startRun(RunOptions options, CommandSender requester) {
+        Optional<UpdateManager.RunHandle> handle = manager.start(config.settings(), ServerPlugins.snapshot(),
+                ServerPlugins.updateFolder(), ServerPlugins.minecraftVersion(), options);
+        if (handle.isEmpty()) {
+            return false;
+        }
+        handle.get().result().whenComplete((report, error) -> runSync(() -> {
+            if (requester == null || requester == Bukkit.getConsoleSender()) {
                 return;
             }
-            
-            String response = String.format(
-                "{\"status\":\"UP\",\"version\":\"%s\",\"last_check\":%d,\"plugins_tracked\":%d}",
-                getPluginMeta().getVersion(),
-                repositoryManager.getLastCheckTimestamp(),
-                repositoryManager.getPluginsTracked()
-            );
-            
-            exchange.getResponseHeaders().set("Content-Type", "application/json");
-            exchange.sendResponseHeaders(200, response.getBytes().length);
-            try (OutputStream os = exchange.getResponseBody()) {
-                os.write(response.getBytes());
+            if (requester instanceof Player p && !p.isOnline()) {
+                return;
             }
-        }
-    }
-    
-    /**
-     * Run auto-discovery on startup (async)
-     */
-    private void runAutoDiscoveryOnStartup() {
-        CompletableFuture.runAsync(() -> {
-            try {
-                getLogger().info("Running auto-discovery on startup...");
-                List<ConfigManager.DiscoveredPlugin> discovered = configManager.discoverUnknownPlugins();
-                
-                if (discovered.isEmpty()) {
-                    getLogger().info("Auto-discovery complete: no unknown plugins found");
-                    return;
-                }
-                
-                int added = 0;
-                for (ConfigManager.DiscoveredPlugin dp : discovered) {
-                    if (configManager.addDiscoveredPlugin(
-                            dp.name(), dp.version(), dp.source(),
-                            dp.projectId(), dp.repo(), dp.hangarSlug(),
-                            dp.spigotmcResourceId(), dp.spigotmcResourceName(),
-                            dp.localPath(), dp.customUrl())) {
-                        added++;
+            if (error != null) {
+                messages.send(requester, "<error>The update run failed: <message>", Messages.text("message", error.getMessage()));
+            } else {
+                requester.sendMessage(messages.prefix().append(reporter.summary(report)));
+                for (PluginResult r : report.results()) {
+                    if (r.status() != PluginResult.Status.UP_TO_DATE) {
+                        requester.sendMessage(reporter.line(r));
                     }
                 }
-                
-                getLogger().info("Auto-discovery complete: added " + added + " of " + discovered.size() + " plugins to config.yml");
-                if (added > 0) {
-                    getLogger().info("Restart the server to apply plugin updates for newly discovered plugins");
-                }
-                
-            } catch (Exception e) {
-                getLogger().severe("Error during auto-discovery on startup: " + e.getMessage());
-                e.printStackTrace();
             }
-        }, executorService);
+        }));
+        return true;
     }
 
     /**
-     * Handle the /updateplugins discover command
-     * Lists discovered plugins not in config and optionally adds them
-     * Usage:
-     *   /updateplugins discover              - list unknown plugins
-     *   /updateplugins discover add          - add all unknown plugins to config
-     *   /updateplugins discover add <name>   - add specific plugin to config
-     *   /updateplugins discover --auto       - run auto-discovery now (even if disabled in config)
+     * Reloads config.yml and rebuilds services. Refused while a run is active.
+     *
+     * @return problems found in the config (empty list = clean); empty optional if refused
      */
-    private void handleDiscoverCommand(CommandSender sender, String[] args) {
-        boolean autoRun = false;
-        boolean shouldAdd = false;
-        String specificPlugin = null;
-        
-        // Parse arguments
-        for (int i = 1; i < args.length; i++) {
-            if (args[i].equalsIgnoreCase("--auto")) {
-                autoRun = true;
-            } else if (args[i].equalsIgnoreCase("add")) {
-                shouldAdd = true;
-                // Check if next argument is a plugin name (not a flag)
-                if (i + 1 < args.length && !args[i + 1].startsWith("--")) {
-                    specificPlugin = args[i + 1];
-                    i++; // Skip the plugin name
-                }
-            }
+    public Optional<List<String>> reload() {
+        if (manager.isRunning()) {
+            return Optional.empty();
         }
-        
-        // Capture for lambda (must be effectively final)
-        final String targetPlugin = specificPlugin;
-        final boolean addMode = shouldAdd;
-        final boolean autoMode = autoRun;
-        
-        // Check if auto-discovery is enabled (unless --auto flag is used)
-        if (!autoMode && !configManager.getAutoDiscover()) {
-            sender.sendMessage(ChatColor.RED + "Auto-discovery is disabled. Enable 'global.auto_discover' in config.yml to use this command, or use --auto flag.");
+        boolean ok = config.load();
+        messages = new Messages(config.settings().style());
+        buildServices();
+        stopHealthServer();
+        startHealthServer();
+        scheduler.start(config.settings().schedule());
+        List<String> problems = config.problems();
+        if (!ok) {
+            return Optional.of(List.of("config.yml is not valid YAML; the previous settings stay active"));
+        }
+        return Optional.of(problems);
+    }
+
+    /**
+     * Finds installed plugins missing from config.yml. Network lookups run in the background.
+     *
+     * @param add   add usable suggestions to config.yml
+     * @param only  restrict to one plugin name, or null
+     */
+    public void discover(CommandSender sender, boolean add, String only) {
+        List<PluginDiscovery.Candidate> candidates = ServerPlugins.unconfigured(config.settings().plugins().keySet(), getName())
+                .stream().filter(c -> only == null || c.name().equalsIgnoreCase(only)).toList();
+        if (candidates.isEmpty()) {
+            messages.send(sender, only == null
+                    ? "<success>Every installed plugin is already in config.yml."
+                    : "<warning><name> is not installed or already in config.yml.", Messages.text("name", only));
             return;
         }
-        
-        CompletableFuture.runAsync(() -> {
+        messages.send(sender, "<primary>Looking up <accent><count></accent> plugins...", Messages.text("count", candidates.size()));
+        ModrinthSource lookup = modrinth;
+        background.execute(() -> {
+            List<PluginDiscovery.Suggestion> suggestions;
             try {
-                List<ConfigManager.DiscoveredPlugin> discovered = configManager.discoverUnknownPlugins();
-                
-                if (discovered.isEmpty()) {
-                    sender.sendMessage(ChatColor.GREEN + "No unknown plugins found - all installed plugins are already configured!");
-                    return;
-                }
-                
-                // Filter for specific plugin if requested
-                if (targetPlugin != null) {
-                    discovered = discovered.stream()
-                        .filter(dp -> dp.name().equalsIgnoreCase(targetPlugin))
-                        .toList();
-                    if (discovered.isEmpty()) {
-                        sender.sendMessage(ChatColor.RED + "Plugin '" + targetPlugin + "' not found among unknown plugins.");
-                        return;
-                    }
-                }
-                
-                if (!addMode) {
-                    // List mode
-                    sender.sendMessage(ChatColor.GOLD + "=== Discovered " + discovered.size() + " unknown plugin(s) ===");
-                    for (ConfigManager.DiscoveredPlugin dp : discovered) {
-                        sender.sendMessage(ChatColor.YELLOW + "  - " + dp.name() + " v" + dp.version() + " (source: " + dp.source() + ")");
-                    }
-                    sender.sendMessage(ChatColor.AQUA + "Use /updateplugins discover add to add all to config.yml");
-                    sender.sendMessage(ChatColor.AQUA + "Use /updateplugins discover add <PluginName> to add a specific plugin");
-                    sender.sendMessage(ChatColor.AQUA + "Use /updateplugins discover --auto to run auto-discovery now");
-                    return;
-                }
-                
-                // Add mode
-                int added = 0;
-                for (ConfigManager.DiscoveredPlugin dp : discovered) {
-                    if (configManager.addDiscoveredPlugin(
-                            dp.name(), dp.version(), dp.source(),
-                            dp.projectId(), dp.repo(), dp.hangarSlug(),
-                            dp.spigotmcResourceId(), dp.spigotmcResourceName(),
-                            dp.localPath(), dp.customUrl())) {
-                        added++;
-                        sender.sendMessage(ChatColor.GREEN + "Added: " + dp.name() + " v" + dp.version() + " (" + dp.source() + ")");
-                    } else {
-                        sender.sendMessage(ChatColor.RED + "Failed to add: " + dp.name());
-                    }
-                }
-                
-                sender.sendMessage(ChatColor.GOLD + "Added " + added + " of " + discovered.size() + " plugins to config.yml");
-                
-                // Provide guidance for incomplete configurations
-                boolean hasIncomplete = discovered.stream().anyMatch(dp -> {
-                    if ("github".equals(dp.source()) && (dp.repo() == null || dp.repo().isEmpty())) return true;
-                    if ("hangar".equals(dp.source()) && (dp.hangarSlug() == null || dp.hangarSlug().isEmpty())) return true;
-                    if ("spigotmc".equals(dp.source()) && (dp.spigotmcResourceId() == null || dp.spigotmcResourceId().isEmpty()) && 
-                        (dp.spigotmcResourceName() == null || dp.spigotmcResourceName().isEmpty())) return true;
-                    if ("local".equals(dp.source()) && (dp.localPath() == null || dp.localPath().isEmpty())) return true;
-                    if ("custom".equals(dp.source()) && (dp.customUrl() == null || dp.customUrl().isEmpty())) return true;
-                    return false;
-                });
-                
-                if (hasIncomplete) {
-                    sender.sendMessage(ChatColor.YELLOW + "Note: Some plugins have incomplete configuration. Edit config.yml to add missing fields:");
-                    sender.sendMessage(ChatColor.YELLOW + "  - GitHub plugins need 'repo' (owner/repo)");
-                    sender.sendMessage(ChatColor.YELLOW + "  - Hangar plugins need 'project_slug' (owner/slug)");
-                    sender.sendMessage(ChatColor.YELLOW + "  - SpigotMC plugins need 'resource_id' or 'resource_name'");
-                    sender.sendMessage(ChatColor.YELLOW + "  - Local plugins need 'path'");
-                    sender.sendMessage(ChatColor.YELLOW + "  - Custom plugins need 'url'");
-                }
-                
-            } catch (Exception e) {
-                getLogger().severe("Error during plugin discovery: " + e.getMessage());
-                e.printStackTrace();
-                sender.sendMessage(ChatColor.RED + "Error during discovery: " + e.getMessage());
+                suggestions = new PluginDiscovery(lookup::projectIdOf).discover(candidates);
+            } catch (IOException e) {
+                runSync(() -> messages.send(sender, "<error>Discovery was interrupted."));
+                return;
             }
+            int added = 0;
+            if (add) {
+                for (PluginDiscovery.Suggestion s : suggestions) {
+                    if (config.addPlugin(s)) {
+                        added++;
+                    }
+                }
+            }
+            int addedCount = added;
+            runSync(() -> {
+                for (PluginDiscovery.Suggestion s : suggestions) {
+                    if (s.isUsable()) {
+                        messages.sendLine(sender, "<success>  + <name> <muted><version></muted> -> <accent><source></accent> <muted><options> (<reason>)",
+                                Messages.text("name", s.name()), Messages.text("version", s.version()),
+                                Messages.text("source", s.source()), Messages.text("options", s.options()),
+                                Messages.text("reason", s.reason()));
+                    } else {
+                        messages.sendLine(sender, "<warning>  ? <name> <muted><version>: <reason> — add it by hand",
+                                Messages.text("name", s.name()), Messages.text("version", s.version()),
+                                Messages.text("reason", s.reason()));
+                    }
+                }
+                if (add) {
+                    messages.send(sender, "<primary>Added <accent><count></accent> plugins to config.yml.",
+                            Messages.text("count", addedCount));
+                } else {
+                    messages.send(sender, "<muted>Run <accent>/updateplugins discover add</accent> to add the usable ones.");
+                }
+            });
         });
     }
 
-    /**
-     * Try to extract GitHub repo from plugin.yml
-     */
-    private String extractGitHubRepo(File jarFile) {
-        if (jarFile == null || !jarFile.exists()) {
-            return null;
+    /** Runs a task on the main thread, if the plugin is still enabled. */
+    public void runSync(Runnable task) {
+        if (!isEnabled()) {
+            return;
         }
-        
-        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
-            var entry = jar.getEntry("plugin.yml");
-            if (entry != null) {
-                try (var is = jar.getInputStream(entry);
-                     var reader = new java.io.InputStreamReader(is)) {
-                    var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
-                    
-                    // Check for website URL that might be GitHub
-                    String website = yaml.getString("website");
-                    if (website != null && website.contains("github.com")) {
-                        // Extract owner/repo from github.com URL
-                        // e.g., https://github.com/Owner/Repo -> Owner/Repo
-                        try {
-                            java.net.URL url = new java.net.URL(website);
-                            String path = url.getPath();
-                            if (path.startsWith("/")) path = path.substring(1);
-                            String[] parts = path.split("/");
-                            if (parts.length >= 2) {
-                                return parts[0] + "/" + parts[1];
-                            }
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-    
-    /**
-     * Try to extract Hangar slug from plugin.yml
-     */
-    private String extractHangarSlug(File jarFile) {
-        if (jarFile == null || !jarFile.exists()) {
-            return null;
-        }
-        
-        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
-            var entry = jar.getEntry("plugin.yml");
-            if (entry != null) {
-                try (var is = jar.getInputStream(entry);
-                     var reader = new java.io.InputStreamReader(is)) {
-                    var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
-                    
-                    // Check for website URL that might be Hangar
-                    String website = yaml.getString("website");
-                    if (website != null && website.contains("hangar.papermc.io")) {
-                        try {
-                            java.net.URL url = new java.net.URL(website);
-                            String path = url.getPath();
-                            if (path.startsWith("/")) path = path.substring(1);
-                            // hangar.papermc.io/plugins/owner/slug
-                            String[] parts = path.split("/");
-                            if (parts.length >= 3 && "plugins".equals(parts[0])) {
-                                return parts[1] + "/" + parts[2];
-                            }
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-    
-    /**
-     * Try to extract SpigotMC resource ID from plugin.yml
-     */
-    private String extractSpigotMCResourceId(File jarFile) {
-        if (jarFile == null || !jarFile.exists()) {
-            return null;
-        }
-        
-        try (java.util.jar.JarFile jar = new java.util.jar.JarFile(jarFile)) {
-            var entry = jar.getEntry("plugin.yml");
-            if (entry != null) {
-                try (var is = jar.getInputStream(entry);
-                     var reader = new java.io.InputStreamReader(is)) {
-                    var yaml = org.bukkit.configuration.file.YamlConfiguration.loadConfiguration(reader);
-                    
-                    // Check for explicit spigotmc.resource_id field
-                    String resourceId = yaml.getString("spigotmc.resource_id");
-                    if (resourceId != null && !resourceId.isEmpty()) {
-                        try {
-                            Integer.parseInt(resourceId);
-                            return resourceId;
-                        } catch (NumberFormatException ignored) {
-                        }
-                    }
-                    
-                    // Check website URL for SpigotMC resource pattern
-                    String website = yaml.getString("website");
-                    if (website != null && website.contains("spigotmc.org")) {
-                        // SpigotMC URLs like: https://www.spigotmc.org/resources/name.12345/
-                        // We can try to extract numeric ID from URL
-                        try {
-                            java.net.URL url = new java.net.URL(website);
-                            String path = url.getPath();
-                            // Look for pattern .12345/ or .12345
-                            java.util.regex.Pattern pattern = java.util.regex.Pattern.compile("\\.(\\d+)(?:/|$)");
-                            java.util.regex.Matcher matcher = pattern.matcher(path);
-                            if (matcher.find()) {
-                                return matcher.group(1);
-                            }
-                        } catch (Exception ignored) {
-                        }
-                    }
-                }
-            }
-        } catch (Exception ignored) {
-        }
-        return null;
-    }
-    
-    /**
-     * Performs the actual plugin update process
-     */
-    private void performUpdates() {
-        try {
-            // Check if we're in include-only mode
-            boolean includeOnly = configManager.getIncludeOnlyMode();
-            
-            // Get plugin list
-            Map<String, Object> plugins = configManager.getPlugins();
-            
-            // Collect all update tasks
-            List<CompletableFuture<?>> updateFutures = new java.util.ArrayList<>();
-            
-            // Process plugins based on mode
-            if (includeOnly) {
-                updateIncludedPlugins(plugins, updateFutures);
-            } else {
-                updateAllExceptExcluded(plugins, updateFutures);
-            }
-            
-            // Wait for all updates to complete
-            if (!updateFutures.isEmpty()) {
-                CompletableFuture.allOf(updateFutures.toArray(new CompletableFuture[0]))
-                    .thenRun(() -> getLogger().info("All plugin updates completed"))
-                    .exceptionally(ex -> {
-                        getLogger().severe("Error during plugin updates: " + ex.getMessage());
-                        return null;
-                    })
-                    .join(); // Wait for completion
-            }
-            
-        } catch (Exception e) {
-            getLogger().severe("Error during plugin updates: " + e.getMessage());
-            e.printStackTrace();
+        if (Bukkit.isPrimaryThread()) {
+            task.run();
+        } else {
+            Bukkit.getScheduler().runTask(this, task);
         }
     }
-    
-    /**
-     * Updates only plugins that are explicitly included in the configuration
-     * @param plugins List of plugins to process
-     * @param futures List to collect update futures
-     */
-    private void updateIncludedPlugins(Map<String, Object> plugins, List<CompletableFuture<?>> futures) {
-        getLogger().info("Starting update process - Include-only mode");
-        
-        for (Map.Entry<String, Object> entry : plugins.entrySet()) {
-            String pluginName = entry.getKey();
-            
-            // Check if plugin is in the included list
-            if (configManager.isPluginIncluded(pluginName)) {
-                futures.add(updateSinglePlugin(pluginName));
-            } else {
-                getLogger().info("Skipping " + pluginName + " - not in include list");
-            }
-        }
+
+    /** Runs blocking work (file I/O, network) off the main thread. */
+    public void runBackground(Runnable task) {
+        background.execute(task);
     }
-    
-    /**
-     * Updates all plugins except those explicitly excluded
-     * @param plugins List of plugins to process
-     * @param futures List to collect update futures
-     */
-    private void updateAllExceptExcluded(Map<String, Object> plugins, List<CompletableFuture<?>> futures) {
-        getLogger().info("Starting update process - Update all except excluded");
-        
-        for (Map.Entry<String, Object> entry : plugins.entrySet()) {
-            String pluginName = entry.getKey();
-            
-            // Check if plugin is in the excluded list
-            if (!configManager.isPluginExcluded(pluginName)) {
-                futures.add(updateSinglePlugin(pluginName));
-            } else {
-                getLogger().info("Skipping " + pluginName + " - excluded");
-            }
-        }
+
+    public UpdaterSettings settings() {
+        return config.settings();
     }
-    
-    /**
-     * Updates a single plugin
-     * @param pluginName Name of the plugin to update
-     * @return CompletableFuture that completes when the update is done
-     */
-    private CompletableFuture<?> updateSinglePlugin(String pluginName) {
-        return CompletableFuture.runAsync(() -> {
-            getLogger().info("Checking updates for " + pluginName);
-            
-            try {
-                // Get plugin details from configuration
-                Map<String, Object> pluginDetails = configManager.getPluginDetails(pluginName);
-                
-                // Validate plugin configuration
-                if (!configManager.validatePluginConfig(pluginName, pluginDetails)) {
-                    getLogger().severe("Skipping " + pluginName + " due to invalid configuration");
-                    return;
-                }
-                
-                // Update based on source
-                repositoryManager.updateFromSource(pluginName, pluginDetails);
-                
-            } catch (Exception e) {
-                getLogger().severe("Failed to update " + pluginName + ": " + e.getMessage());
-                e.printStackTrace();
-            }
-        }, executorService);
+
+    public List<String> configProblems() {
+        return config.problems();
+    }
+
+    public Messages messages() {
+        return messages;
+    }
+
+    public UpdateManager manager() {
+        return manager;
+    }
+
+    public StateStore state() {
+        return state;
+    }
+
+    public BackupManager backups() {
+        return backups;
+    }
+
+    public NotificationService notifications() {
+        return notifications;
+    }
+
+    public UpdateScheduler scheduler() {
+        return scheduler;
+    }
+
+    public Optional<UpdateReport> lastReport() {
+        return Optional.ofNullable(lastReport);
+    }
+
+    public ResultReporter reporter() {
+        return reporter;
+    }
+
+    public Path updateFolder() {
+        return ServerPlugins.updateFolder();
     }
 }

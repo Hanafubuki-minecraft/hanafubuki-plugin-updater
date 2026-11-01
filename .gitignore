@@ -4,6 +4,11 @@
 # Log files
 *.log
 
+# Gradle
+.gradle/
+build/
+.kotlin/
+
 # Plugin build cache
 .cache/
 .mvn/
@@ -21,7 +26,13 @@ Thumbs.db
 
 # Generated folders
 target/
-build/
+
+# Local test server data (never commit real server configs or tokens)
+plugins/
+run/
 
 # Local config overrides
 config.yml.local
+
+# Agent worktrees
+.claude/worktrees/

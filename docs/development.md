@@ -1,373 +1,130 @@
-# Development Guide
+# Development
 
-## Prerequisites
+## Requirements
 
-- Java 21 (JDK)
-- Gradle 8.x (wrapper included)
-- Git
+- Java 21 (the Gradle toolchain requests it)
+- The Gradle wrapper in the repository (`./gradlew`)
+- Network access to `repo.papermc.io` and Maven Central for dependencies
 
-## Project Structure
+Builds and releases are done by GitHub Actions; a local build is only needed while developing.
+
+## Project layout
 
 ```
-hanafubuki-plugin-updater/
-├── build.gradle.kts          # Gradle build script (Kotlin DSL)
-├── settings.gradle.kts       # Gradle settings
-├── gradle.properties         # Version number
-├── gradlew                   # Gradle wrapper (Linux/Mac)
-├── gradlew.bat               # Gradle wrapper (Windows)
-├── src/
-│   ├── main/
-│   │   ├── java/com/hanafubuki/updater/
-│   │   │   ├── PluginUpdater.java           # Main plugin class
-│   │   │   ├── config/ConfigManager.java    # Configuration management
-│   │   │   ├── manager/RepositoryManager.java # Update coordination
-│   │   │   ├── source/
-│   │   │   │   ├── ModrinthSourceHandler.java
-│   │   │   │   └── GitHubSourceHandler.java
-│   │   │   └── util/VersionUtils.java       # Version comparison
-│   │   └── resources/
-│   │       └── plugin.yml                   # Plugin descriptor
-│   └── test/                                # Unit tests (optional)
-├── docs/                                    # Documentation
-│   ├── architecture.md
-│   ├── configuration.md
-│   ├── api.md
-│   └── development.md
-├── LICENSE                                  # GPLv3
-└── README.md
-```
-
-## Build Process
-
-```mermaid
-flowchart LR
-    A[Source Code] --> B[./gradlew compileJava]
-    B --> C[Classes in build/classes]
-    C --> D[./gradlew jar]
-    D --> E[build/libs/hanafubuki-plugin-updater-<version>.jar]
-    E --> F[Plugin YML expanded with version]
-    
-    style E fill:#9f9,stroke:#333
-```
-
-### Build Commands
-
-```bash
-# Clean build
-./gradlew clean build
-
-# Compile only
-./gradlew compileJava
-
-# Build JAR only
-./gradlew jar
-
-# Run tests
-./gradlew test
-
-# Check for dependency updates
-./gradlew dependencyUpdates
-```
-
-### Version Management
-
-Version lives in **single location**: `gradle.properties`
-
-```properties
-version=1.0.0
-```
-
-This is automatically expanded into:
-- `plugin.yml` → `version: ${version}`
-- `MANIFEST.MF` → `Implementation-Version`
-- User-Agent headers → `HanafubukiPluginUpdater/1.0.0`
-
-**To bump version:**
-1. Edit `gradle.properties`
-2. Commit and push
-3. GitHub Actions builds and releases automatically
-
-## Release Workflow
-
-```mermaid
-sequenceDiagram
-    participant Dev as Developer
-    participant Git as Git/GitHub
-    participant GA as GitHub Actions
-    participant Repo as Maven/Package Repo
-    
-    Dev->>Git: Edit gradle.properties (version bump)
-    Dev->>Git: git commit -m "Release 1.0.1"
-    Dev->>Git: git push origin master
-    
-    Git->>GA: Trigger workflow (push to master)
-    GA->>GA: Checkout code
-    GA->>GA: Setup Java 21
-    GA->>GA: ./gradlew build
-    GA->>GA: Run tests
-    GA->>GA: Build JAR
-    GA->>Git: Create GitHub Release
-    GA->>Git: Upload JAR as artifact
-    GA->>Repo: Publish to Maven (if configured)
-    
-    Note over Dev,Repo: No local builds needed for release!
-```
-
-### GitHub Actions Workflow (`.github/workflows/release.yml`)
-
-```yaml
-name: Release
-on:
-  push:
-    branches: [master]
-jobs:
-  build:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-java@v4
-        with:
-          java-version: 21
-          distribution: temurin
-      - run: ./gradlew build
-      - uses: softprops/action-gh-release@v1
-        with:
-          files: build/libs/*.jar
-```
-
-## Testing
-
-### Unit Tests
-
-```bash
-./gradlew test
-```
-
-Test structure (when implemented):
-```
+build.gradle.kts            Gradle build (Kotlin DSL)
+settings.gradle.kts         rootProject.name = "hanafubuki-plugin-updater"
+gradle.properties           version=... (the only place the version is written)
+src/main/resources/
+  plugin.yml                commands, permissions; ${version} is filled in by processResources
+  config.yml                default config with comments (copied as-is)
+src/main/java/com/hanafubuki/updater/
+  PluginUpdater.java        main class
+  UpdateScheduler.java  JoinListener.java  ServerPlugins.java  Permissions.java
+  command/  gui/  console/  config/  manager/  source/  http/  notify/  discovery/  health/  util/
 src/test/java/com/hanafubuki/updater/
-├── util/VersionUtilsTest.java
-├── config/ConfigManagerTest.java
-└── source/
-    ├── ModrinthSourceHandlerTest.java
-    └── GitHubSourceHandlerTest.java
+  testing/                  FakeHttpServer, TestHttp, TestJars
+  contract/                 tests against the real APIs (tag "contract")
+  config/ util/ http/ source/ manager/ ...   unit tests, one package per main package
+docs/                       this documentation and config.example.yml
+.github/workflows/          build.yml (CI), release.yml (releases)
 ```
 
-### Manual Testing
-
-1. **Local server test:**
-   ```bash
-   # Build
-   ./gradlew build
-   
-   # Copy to test server
-   cp build/libs/hanafubuki-plugin-updater-*.jar /path/to/server/plugins/
-   
-   # Start server (Paper 1.21.9)
-   java -jar paper-1.21.9.jar
-   ```
-
-2. **Test commands:**
-   - `/updateplugins` - Run update check
-   - Check console for MiniMessage output
-   - Verify `plugins/update/` folder gets JARs
-
-3. **Config test:**
-   - Edit `plugins/HanafubukiPluginUpdater/config.yml`
-   - Add test plugins from Modrinth/GitHub
-   - Run `/updateplugins` again
-
-## Code Style & Patterns
-
-### Java Conventions
-
-- Package: `com.hanafubuki.updater.*`
-- Classes: PascalCase (`PluginUpdater`, `ConfigManager`)
-- Methods: camelCase (`getLatestVersion`, `isVersionNewer`)
-- Constants: UPPER_SNAKE_CASE (`DEFAULT_TIMEOUT`)
-- No wildcard imports
-
-### Async Pattern
-
-All network I/O uses `CompletableFuture`:
-
-```java
-// Correct - async
-CompletableFuture.runAsync(() -> {
-    try {
-        performNetworkOperation();
-    } catch (Exception e) {
-        logger.severe("Error: " + e.getMessage());
-    }
-});
-
-// Wrong - blocks main thread
-performNetworkOperation(); // DON'T DO THIS
-```
-
-### Error Handling Pattern
-
-```java
-try {
-    String result = apiCall();
-    if (result != null) {
-        processResult(result);
-    }
-} catch (IOException e) {
-    getLogger().warning("API call failed: " + e.getMessage());
-    // Continue with other plugins
-}
-```
-
-### Configuration Access
-
-```java
-// Use ConfigManager accessors, not raw maps
-boolean includeOnly = configManager.getIncludeOnlyMode();
-List<String> excluded = configManager.getExcludeList();
-Map<String, Object> plugin = configManager.getPluginDetails(name);
-```
-
-## Debugging
-
-### Enable Debug Logging
-
-In `config.yml`:
-```yaml
-console:
-  level: "DEBUG"
-```
-
-### Common Issues
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| "Failed to load configuration" | Invalid YAML | Check `config.yml` syntax |
-| "Could not find project ID" | Plugin not on Modrinth | Verify plugin name/spelling |
-| 403 from API | Missing User-Agent | Check handler sets User-Agent |
-| Rate limited | Too many requests | Add GitHub token, cache IDs |
-| JAR not in update folder | Download failed | Check network, URL validity |
-
-### Remote Debugging
-
-```bash
-# Start server with debug port
-java -agentlib:jdwp=transport=dt_socket,server=y,suspend=n,address=*:5005 -jar paper-1.21.9.jar
-
-# Attach IDE debugger to port 5005
-```
-
-## Adding Features
-
-### New Source Handler
-
-1. Create `NewSourceHandler.java` in `source/`
-2. Implement required methods
-3. Register in `RepositoryManager` constructor
-4. Add routing in `PluginUpdater.updateSinglePlugin()`
-5. Add config section in `ConfigManager`
-
-### New Config Option
-
-1. Add field to `config.yml` schema
-2. Add getter in `ConfigManager`
-3. Use in relevant component
-4. Document in `configuration.md`
-
-### New Command
-
-1. Add to `plugin.yml` commands section
-2. Handle in `PluginUpdater.onCommand()`
-3. Add permission node
-4. Implement async execution
+Package responsibilities are described in [architecture.md](architecture.md#packages).
 
 ## Dependencies
 
-| Dependency | Version | Purpose |
-|------------|---------|---------|
-| Paper API | 1.21.9-R0.1-SNAPSHOT | Bukkit/Spigot API |
-| Gson | 2.10+ (transitive) | JSON parsing |
-| Java HTTP Client | JDK 21 built-in | Network requests |
+All `compileOnly`, nothing is shaded into the jar:
 
-## IDE Setup
+| Dependency | Why |
+|---|---|
+| `io.papermc.paper:paper-api:1.21.9-R0.1-SNAPSHOT` (repo `https://repo.papermc.io/repository/maven-public/`) | Bukkit/Paper API, Adventure, MiniMessage |
+| `com.google.code.gson:gson:2.11.0` | JSON (shipped by Paper) |
+| `org.yaml:snakeyaml:2.2` | descriptor parsing (shipped by Paper) |
 
-### IntelliJ IDEA
-1. Open as Gradle project
-2. Enable annotation processing
-3. Set Project SDK: Java 21
-4. Set Language Level: 21
+Tests use JUnit 5 (`junit-bom:5.11.4`) and the same libraries on the test classpath. There is no mocking
+library: HTTP is tested against a real local server.
 
-### VS Code
-1. Install Extension Pack for Java
-2. Open folder
-3. Run `./gradlew build` once
-4. Java extension auto-configures
-
-## Contributing
-
-1. Fork repository
-2. Create feature branch: `git checkout -b feature/amazing-feature`
-3. Make changes
-4. Run tests: `./gradlew test`
-5. Build: `./gradlew build`
-6. Commit: `git commit -m "Add amazing feature"`
-7. Push: `git push origin feature/amazing-feature`
-8. Open Pull Request
-
-### Commit Message Format
-
-```
-type(scope): description
-
-[optional body]
-
-[optional footer]
-```
-
-Types: `feat`, `fix`, `docs`, `style`, `refactor`, `test`, `chore`
-
-Example:
-```
-feat(modrinth): add support for beta versions
-
-Allow configuring include_beta in modrinth section
-to include beta/alpha releases in version checks.
-
-Closes #123
-```
-
-## Troubleshooting Build
-
-### Gradle Wrapper Issues
+## Building
 
 ```bash
-# Regenerate wrapper
-gradle wrapper --gradle-version 8.5
-
-# Or download fresh
-./gradlew --version
+./gradlew build
+# → build/libs/hanafubuki-plugin-updater-<version>.jar
 ```
 
-### Dependency Resolution
+`build` compiles with `-Xlint:unchecked -Xlint:rawtypes`, runs the unit tests and packages the jar.
+`processResources` expands `${version}` in `plugin.yml` from `gradle.properties`; `config.yml` is copied
+unchanged.
 
-```bash
-# Refresh dependencies
-./gradlew --refresh-dependencies build
+## Tests
 
-# View dependency tree
-./gradlew dependencies
-```
+### Unit and integration tests (`./gradlew test`, part of `build`)
 
-### Clean Build
+The core packages (`util`, `http`, `source`, `manager`, `config` parsing, `discovery`, `notify`, `health`) do
+not use the Bukkit API, so they are tested without a server:
 
-```bash
-./gradlew clean build --rerun-tasks
-```
+- `testing/FakeHttpServer` is a real HTTP server on `localhost` (JDK `HttpServer`). Tests register routes
+  (`json(path, body)`, `route(path, handler)`) and point a source at `server.uri(...)` through the
+  constructors that take a base URL. Every request is recorded with method, path, query, headers and body, so
+  tests can assert the User-Agent, that a token was or was not sent, conditional headers, redirects, retries.
+- `testing/TestHttp` builds `HttpService` instances that do not really sleep between retries and records the
+  requested delays.
+- `testing/TestJars` writes small plugin jars with a `plugin.yml` or `paper-plugin.yml` (name, version,
+  dependencies, api-version) for install, backup and dependency tests.
+- `config/DefaultConfigTest` parses `src/main/resources/config.yml` and `docs/config.example.yml` and fails on
+  any reported problem, and checks that the example uses every source and that every example entry passes its
+  source's `validate()`. Keep both files valid when you change options.
 
-## Useful Links
+### Contract tests (`./gradlew contractTest`)
 
-- [Paper API Javadocs](https://jd.papermc.io/paper/1.21.9/)
-- [Modrinth API Docs](https://docs.modrinth.com/)
-- [GitHub REST API Docs](https://docs.github.com/en/rest)
-- [MiniMessage Format](https://docs.advntr.dev/minimessage/format.html)
-- [Gradle Kotlin DSL](https://docs.gradle.org/current/userguide/kotlin_dsl.html)
+`src/test/java/.../contract/` calls the real Modrinth, Hangar, Spiget and GitHub APIs (JUnit tag `contract`)
+to catch API changes: e.g. LuckPerms on Modrinth is downloaded and verified by hash, ViaVersion on Hangar,
+the Spigot exact-name rule, GitHub asset selection, signatures and advisories. They need internet access and
+are **not** part of `build`; run them with the separate `contractTest` task. `GITHUB_TOKEN` in the environment
+raises the GitHub limit; when GitHub refuses because of the rate limit, the GitHub tests are skipped instead of
+failing.
+
+## Continuous integration
+
+| Workflow | Trigger | What it does |
+|---|---|---|
+| `.github/workflows/build.yml` | every push (all branches) and every pull request | Java 21 (Temurin), `./gradlew build --no-daemon`; uploads `build/reports/tests/` when it fails |
+| `.github/workflows/release.yml` | push to `master` that changes `gradle.properties` or `src/main/resources/plugin.yml`; manual dispatch | reads `version` from `gradle.properties`, builds, creates tag `v<version>` if it does not exist, publishes a GitHub release with generated notes and `build/libs/*.jar` |
+
+## Releasing
+
+1. Change `version=` in `gradle.properties` (the only place).
+2. Commit and push to `master`.
+3. `release.yml` builds and publishes release `v<version>`.
+
+The release jar is what servers download; this updater can update itself if you add an entry with
+`source: github` and `repo: Hanafubuki-minecraft/hanafubuki-plugin-updater`.
+
+## Adding a source
+
+1. Implement `source/UpdateSource` in a new class (`id`, `validate`, `findLatest`). Use the injected
+   `HttpService` for all requests (never a new client), take timeouts from `SourceSettings`, throw
+   `IOException` with a message an admin can act on, and add a constructor that takes a base URL for tests.
+2. Return `UpdateCandidate` with a checksum whenever the source publishes one; add a note when it does not.
+   Never pick between several candidates by guessing.
+3. Register the id in `SettingsParser.SOURCES` and the instance in `PluginUpdater.buildServices()`. If it needs a
+   config section, parse it in `SettingsParser` (use `source("<id>")` for timeouts and retries) and add it to
+   `UpdaterSettings` and `UpdaterSettings.downloadTimeout`.
+4. Document the options in `src/main/resources/config.yml`, add an entry to `docs/config.example.yml`
+   (`DefaultConfigTest` requires every source there) and describe it in [configuration.md](configuration.md),
+   [api.md](api.md) and [security.md](security.md).
+5. Write unit tests with `FakeHttpServer` and, if it is a public API, a contract test.
+
+## Conventions
+
+- Java 21, package `com.hanafubuki.updater`, group `com.hanafubuki`.
+- No network or file I/O on the server main thread; Bukkit calls only on the main thread
+  (`PluginUpdater.runSync`).
+- Core packages stay free of `org.bukkit` imports.
+- Messages use MiniMessage templates with the style tags `<primary> <accent> <success> <warning> <error>
+  <muted>`; values go in through `Messages.text(...)` (plain text).
+- Code comments and docs in English.
+- When behaviour changes, update `docs/` in the same change.
+
+## License
+
+GPLv3, like the other Hanafubuki plugins. See [LICENSE](../LICENSE).

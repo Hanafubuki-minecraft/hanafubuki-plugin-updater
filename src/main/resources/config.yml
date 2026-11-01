@@ -1,402 +1,196 @@
-# Hanafubuki Plugin Updater - Example Configuration
-# Copy this file to config.yml and customize for your server
+# Hanafubuki Plugin Updater
+#
+# Updates are downloaded into the Bukkit update folder (plugins/update/ by default) under the
+# same file name as the installed jar. Paper swaps them in on the next restart; running jars
+# are never touched. All network work runs in the background.
+#
+# "${NAME}" anywhere in a value is replaced with the environment variable NAME, e.g.
+# token: "${GITHUB_TOKEN}" or "Bearer ${TOKEN}". Use this so secrets do not live in this file.
+#
+# Docs: https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/tree/master/docs
 
 # ============================================
-# GLOBAL SETTINGS
+# GLOBAL
 # ============================================
 global:
-  # Minimum version that plugins must meet to be updated
-  # Plugins below this version will be skipped
-  min_version: "1.0.0"
-  
-  # Maximum version that plugins can be updated to
-  # Use "latest" or high version like "99.99.99" for no limit
-  max_version: "99.99.99"
-  
-  # Auto-discover installed plugins not in config
-  # When true, discovered plugins can be added via /updateplugins discover
-  auto_discover: false
-  
-  # Auto-discover plugins on plugin enable (startup)
-  # When true, runs discovery once per server start and adds unknown plugins to config
-  auto_discover_on_startup: false
-  
-  # Auto-update config.yml with new versions after successful update
+  # Installed versions below min_version are never updated. Empty = no limit.
+  min_version: ""
+  # Versions above max_version are never installed. Empty = no limit.
+  max_version: ""
+  # Write the new version into the plugin's entry below after an update.
   auto_update_config: true
+  # Allow "/updateplugins discover add" to add installed plugins that are missing below.
+  auto_discover: false
+  # Run discovery once at startup and add every plugin it can identify.
+  auto_discover_on_startup: false
+  # How many plugins are checked at the same time (1-16).
+  parallelism: 4
+  # Largest accepted plugin jar in MB.
+  max_download_mb: 256
 
 # ============================================
-# UPDATE MODES
+# WHICH PLUGINS ARE UPDATED
 # ============================================
 modes:
-  # Include-only mode:
-  # - true  = Only update plugins explicitly listed in include_list
-  # - false = Update all configured plugins except those in exclude_list
+  # true  = only plugins in include_list are updated
+  # false = every plugin in "plugins:" is updated, except exclude_list
   include_only: false
-  
-  # List of plugins to exclude from updates
-  # Works in BOTH modes (include_only true or false)
+  # Never updated, in both modes (names are case-insensitive).
   exclude_list: []
-    # - "plugin-to-skip"
-    # - "another-plugin"
-  
-  # List of plugins to include (only used when include_only: true)
   include_list: []
-    # - "plugin-to-update"
-    # - "another-plugin"
 
 # ============================================
-# MODRINTH SETTINGS
+# AUTOMATIC CHECKS
 # ============================================
+schedule:
+  # off | interval | daily | weekly
+  mode: off
+  # interval mode: minutes between checks (15-10080)
+  interval_minutes: 360
+  # daily / weekly mode: local time HH:MM
+  time: "04:00"
+  # weekly mode: monday ... sunday
+  day: monday
+  # Time zone for daily/weekly, e.g. Europe/Moscow. Empty = server time zone.
+  timezone: ""
+  # Also check once after the server started.
+  check_on_startup: false
+  startup_delay_seconds: 60
+  # true = automatic runs only report updates and download nothing.
+  check_only: false
+
+# ============================================
+# SAFETY
+# ============================================
+backups:
+  # Keep a copy of the replaced jar before every update, for /updateplugins rollback.
+  enabled: true
+  # Backups kept per plugin; older ones are deleted (1-100).
+  keep: 3
+
+dependencies:
+  # Checks the new version's required plugins and api-version before staging it.
+  # block = do not install, warn = install and warn, off = no check
+  check: block
+
+# ============================================
+# NOTIFICATIONS
+# ============================================
+notifications:
+  # Message players with hanafubuki.updater.notify (ops by default) about updates and advisories.
+  in_game: true
+  # Remind them on join while updates wait for a restart.
+  on_join: true
+  # Name used in Discord and webhook messages.
+  server_name: "Hanafubuki"
+
+  discord:
+    enabled: false
+    # Server settings -> Integrations -> Webhooks -> Copy Webhook URL. "${DISCORD_WEBHOOK_URL}" works too.
+    webhook_url: ""
+    username: "Hanafubuki Updater"
+    avatar_url: ""
+    # Put in front of every message, e.g. "<@&123456789012345678>" to ping a role. Empty = no ping.
+    mention: ""
+    # updated, available, failed, security, summary
+    events: [updated, failed, security]
+
+  webhook:
+    enabled: false
+    # Receives a JSON POST after each run (see docs/configuration.md for the format).
+    url: ""
+    headers: {}
+      # Authorization: "Bearer ${UPDATER_WEBHOOK_TOKEN}"
+    events: [updated, available, failed, security, summary]
+
+# ============================================
+# SOURCES
+# ============================================
+# Every source section accepts:
+#   timeout: 10            API request timeout in seconds
+#   download_timeout: 120  download timeout in seconds
+#   retry: { max_retries: 3, base_delay_ms: 1000, max_delay_ms: 10000 }
+
 modrinth:
-  # Custom User-Agent (optional, defaults to plugin name/version)
-  # user_agent: "MyServer/Updater/1.0"
-  
-  # API request timeout in seconds (default: 10)
-  # timeout: 10
-  
-  # Download timeout in seconds (default: 60)
-  # download_timeout: 60
-  
-  # Default loader filter (default: ["paper"])
-  # loaders: ["paper", "spigot"]
-  
-  # Default game version filter (default: ["1.21.9"])
-  # game_versions: ["1.21.9", "1.21.8"]
-  
-  # Retry configuration for failed requests
-  retry:
-    # Maximum number of retry attempts (default: 3)
-    max_retries: 3
-    
-    # Base delay in milliseconds (default: 1000)
-    # Actual delay = base_delay * 2^attempt + jitter
-    base_delay_ms: 1000
-    
-    # Maximum delay in milliseconds (default: 10000)
-    max_delay_ms: 10000
+  # Loaders and game versions a Modrinth version must list. Empty game_versions = the server's version.
+  loaders: ["paper"]
+  game_versions: []
+  # release, beta, alpha
+  version_types: ["release"]
 
-# ============================================
-# GITHUB SETTINGS
-# ============================================
 github:
-  # Custom User-Agent (optional, defaults to plugin name/version)
-  # user_agent: "MyServer/Updater/1.0"
-  
-  # API request timeout in seconds (default: 10)
-  # timeout: 10
-  
-  # Download timeout in seconds (default: 60)
-  # download_timeout: 60
-  
-  # GitHub token for authenticated requests (optional, increases rate limit)
-  # Get token at: https://github.com/settings/tokens
-  # token: "ghp_xxxxxxxxxxxx"
-  
-  # Default branch to check if no releases exist (default: "main")
-  # default_branch: "main"
-  
-  # Retry configuration for failed requests
-  retry:
-    # Maximum number of retry attempts (default: 3)
-    max_retries: 3
-    
-    # Base delay in milliseconds (default: 1000)
-    # Actual delay = base_delay * 2^attempt + jitter
-    base_delay_ms: 1000
-    
-    # Maximum delay in milliseconds (default: 10000)
-    max_delay_ms: 10000
+  # Optional token: raises the API limit from 60 to 5000 requests per hour and allows private repos.
+  # Prefer an environment variable: token: "${GITHUB_TOKEN}"
+  token: ""
+  # Release signatures: off | warn | require (the release tag or its commit must be verified by GitHub)
+  signatures: off
+  include_prereleases: false
+  # Check GitHub security advisories of every plugin that has a "repo" set (any source).
+  advisories: true
 
-# ============================================
-# HANGAR SETTINGS (PaperMC official plugin repository)
-# ============================================
 hangar:
-  # Custom User-Agent (optional, defaults to plugin name/version)
-  # user_agent: "MyServer/Updater/1.0"
-  
-  # API request timeout in seconds (default: 10)
-  # timeout: 10
-  
-  # Download timeout in seconds (default: 60)
-  # download_timeout: 60
+  # Channel to use: Release, Snapshot, ... or "*" for any channel.
+  channel: "Release"
+
+spigotmc: {}
+
+custom: {}
 
 # ============================================
-# SPIGOTMC SETTINGS (via Spiget API)
-# ============================================
-spigotmc:
-  # Custom User-Agent (optional, defaults to plugin name/version)
-  # user_agent: "MyServer/Updater/1.0"
-  
-  # API request timeout in seconds (default: 10)
-  # timeout: 10
-  
-  # Download timeout in seconds (default: 60)
-  # download_timeout: 60
-
-# ============================================
-# LOCAL FILE SOURCE SETTINGS
-# ============================================
-local:
-  # Timeout for file operations in seconds (default: 5)
-  # timeout: 5
-
-# ============================================
-# CUSTOM HTTP SOURCE SETTINGS
-# ============================================
-custom:
-  # Custom User-Agent (optional, defaults to plugin name/version)
-  # user_agent: "MyServer/Updater/1.0"
-  
-  # API request timeout in seconds (default: 10)
-  # timeout: 10
-  
-  # Download timeout in seconds (default: 60)
-  # download_timeout: 60
-
-# ============================================
-# CONSOLE OUTPUT SETTINGS
+# OUTPUT
 # ============================================
 console:
-  # Enable MiniMessage formatting (default: true)
-  # Requires Paper/Adventure API
-  mini_message: true
-  
-  # Output as JSON lines instead of human-readable (default: false)
-  # Each line is a JSON object with: timestamp, level, plugin, action, version, duration_ms, error
+  # One JSON object per line instead of coloured text (for log collectors).
   json_format: false
-  
-  # Color configuration for different message types
-  # Use MiniMessage format: https://docs.advntr.dev/minimessage/format.html
-  colors:
-    info: "<green>"
-    warning: "<yellow><bold>"
-    error: "<red><italic>"
-    success: "<aqua><bold>"
-    header: "<gradient:gold:yellow>"
 
-# ============================================
-# HEALTH CHECK SETTINGS
-# ============================================
+# MiniMessage styles for chat and console: https://docs.advntr.dev/minimessage/format.html
+style:
+  prefix: "<gradient:#f9a8d4:#c4b5fd>Hanafubuki</gradient> <dark_gray>»</dark_gray> "
+  primary: "<#f9a8d4>"
+  accent: "<#c4b5fd>"
+  success: "<green>"
+  warning: "<yellow>"
+  error: "<red>"
+  muted: "<gray>"
+
+# HTTP endpoint for monitoring: GET /health (JSON) and GET /metrics (Prometheus).
 health_check:
-  # Enable HTTP health check endpoint (default: false)
   enabled: false
-  
-  # Port to bind the health check endpoint (default: 8080)
-  # Only used when enabled: true
+  # 127.0.0.1 = only reachable from this machine. Use 0.0.0.0 only behind a firewall.
+  bind_address: "127.0.0.1"
   port: 8080
 
 # ============================================
-# PLUGIN LIST - Plugins to update
+# PLUGINS
 # ============================================
-plugins:
-  # ============================================
-  # MODRINTH PLUGINS
-  # ============================================
-  # For Modrinth plugins, 'source' and 'version' are required.
-  # The plugin identifies the project by SHA-512 hash of the installed JAR
-  # (secure, no search by name). You can optionally specify 'project_id'
-  # (Modrinth project ID or slug) to override hash-based lookup.
-  
-  # Example: WorldEdit (Modrinth)
-  "WorldEdit":
-    source: "modrinth"
-    version: "7.3.12"
-    # project_id: "A1B2C3D4"  # Optional: explicit Modrinth project ID
-    # min_version: "7.0.0"    # Optional: override global min
-    # max_version: "7.9.9"    # Optional: override global max
-  
-  # Example: LuckPerms (Modrinth)
-  "LuckPerms":
-    source: "modrinth"
-    version: "5.4.120"
-    # project_id: "luckperms"
-  
-  # Example: ViaVersion (Modrinth)
-  "ViaVersion":
-    source: "modrinth"
-    version: "5.3.0"
-    # project_id: "viaversion"
-  
-  # Example: Geyser (Modrinth)
-  "Geyser-Spigot":
-    source: "modrinth"
-    version: "2.4.0"
-    # project_id: "geyser"
-
-  # ============================================
-  # GITHUB PLUGINS
-  # ============================================
-  # For GitHub plugins, 'source', 'version', AND 'repo' are required.
-  # 'repo' must be in 'owner/repo' format.
-  # The plugin will check releases, falling back to main branch commit.
-  
-  # Example: Paper (GitHub)
-  "Paper":
-    source: "github"
-    version: "1.21.9-R0.1"
-    repo: "PaperMC/Paper"
-    # asset_pattern: "paper-*.jar"  # Optional: specific asset pattern
-    # min_version: "1.21.0"         # Optional: override global min
-    # max_version: "1.21.9"         # Optional: override global max
-  
-  # Example: Floodgate (GitHub)
-  "Floodgate":
-    source: "github"
-    version: "2.4.0"
-    repo: "GeyserMC/Floodgate"
-    # asset_pattern: "floodgate-spigot.jar"
-  
-  # Example: ProtocolLib (GitHub)
-  "ProtocolLib":
-    source: "github"
-    version: "5.2.0"
-    repo: "dmulloy2/ProtocolLib"
-    # asset_pattern: "ProtocolLib.jar"
-
-  # ============================================
-  # HANGAR PLUGINS (PaperMC official plugin repository)
-  # ============================================
-  # For Hangar plugins, 'source', 'version', and 'project_slug' are required.
-  # 'project_slug' must be in 'owner/slug' format (e.g., "EngineHub/WorldEdit").
-  # The plugin filters by Paper platform and server version automatically.
-  # SHA-256 checksums are verified from the API.
-  
-  # Example: WorldEdit (Hangar)
-  "WorldEdit-Hangar":
-    source: "hangar"
-    version: "7.4.5"
-    project_slug: "EngineHub/WorldEdit"
-    # min_version: "7.0.0"    # Optional: override global min
-    # max_version: "7.9.9"    # Optional: override global max
-
-  # Example: LuckPerms (Hangar)
-  "LuckPerms-Hangar":
-    source: "hangar"
-    version: "5.4.120"
-    project_slug: "LuckPerms/LuckPerms"
-
-  # ============================================
-  # SPIGOTMC PLUGINS (via Spiget API)
-  # ============================================
-  # For SpigotMC plugins, 'source', 'version', and either 'resource_id' or 'resource_name' are required.
-  # 'resource_id' is the numeric resource ID from spigotmc.org (e.g., 12345).
-  # 'resource_name' is the resource name for search-based lookup.
-  # Note: Spiget API doesn't provide checksums, so hash verification is skipped.
-  
-  # Example: EssentialsX (SpigotMC - by resource_id)
-  "EssentialsX-Spigot":
-    source: "spigotmc"
-    version: "2.20.1"
-    resource_id: 9089
-    # min_version: "2.0.0"    # Optional: override global min
-    # max_version: "2.99.99"  # Optional: override global max
-
-  # Example: Vault (SpigotMC - by resource_name)
-  "Vault-Spigot":
-    source: "spigotmc"
-    version: "1.7.3"
-    resource_name: "Vault"
-
-  # ============================================
-  # LOCAL FILE SOURCE PLUGINS
-  # ============================================
-  # For local file source, 'source', 'version', and 'path' are required.
-  # 'path' can be a directory (scanned for .jar files) or a direct file path.
-  # Supports local paths, SMB/CIFS shares, NFS mounts.
-  # Optional 'pattern' (regex) to extract version from filename.
-  # Optional 'checksum' (SHA-256) or .sha256/.sha512 sidecar files for verification.
-  
-  # Example: Custom plugin from local directory
-  "MyCustomPlugin-Local":
-    source: "local"
-    version: "1.0.0"
-    path: "/opt/minecraft/plugins/update-source/MyCustomPlugin"
-    # pattern: "MyCustomPlugin-(\\d+\\.\\d+\\.\\d+)\\.jar"  # Optional: extract version from filename
-    # checksum: "a1b2c3d4e5f6..."  # Optional: explicit SHA-256
-
-  # Example: Plugin from network share (SMB/CIFS)
-  "SharedPlugin-Local":
-    source: "local"
-    version: "2.1.0"
-    path: "/mnt/plugins-share/SharedPlugin"
-    # pattern: "SharedPlugin_v(\\d+\\.\\d+\\.\\d+)\\.jar"
-
-  # ============================================
-  # CUSTOM HTTP SOURCE PLUGINS
-  # ============================================
-  # For custom HTTP source, 'source', 'version', and 'url' are required.
-  # 'url' is the REST API endpoint returning JSON.
-  # Optional JSONPath expressions for extracting data:
-  #   - version_path: path to version string (default: tries common fields)
-  #   - download_url_path: path to download URL (default: tries common fields)
-  #   - checksum_path: path to SHA-256 checksum (default: tries common fields)
-  # Optional 'headers' map for custom headers.
-  # Optional 'auth' object for authentication (bearer, basic, api_key).
-  # Optional 'checksum' for explicit expected SHA-256.
-  
-  # Example: Custom REST API with JSONPath
-  "MyPlugin-Custom":
-    source: "custom"
-    version: "1.0.0"
-    url: "https://api.example.com/plugins/myplugin/latest"
-    version_path: "\$.version"
-    download_url_path: "\$.download_url"
-    checksum_path: "\$.sha256"
-    headers:
-      X-Custom-Header: "my-value"
-    auth:
-      type: "bearer"
-      token: "your-api-token-here"
-    # checksum: "a1b2c3d4e5f6..."  # Optional: override checksum from API
-
-  # Example: Custom API with Basic Auth
-  "AnotherPlugin-Custom":
-    source: "custom"
-    version: "2.0.0"
-    url: "https://internal-api.example.com/v1/plugins/anotherplugin"
-    version_path: "\$.latest_version"
-    download_url_path: "\$.assets[0].url"
-    checksum_path: "\$.assets[0].checksum"
-    auth:
-      type: "basic"
-      username: "updater"
-      password: "secret-password"
-
-  # ============================================
-  # ADD YOUR PLUGINS BELOW
-  # ============================================
-  # "YourPluginName":
-  #   source: "modrinth"
-  #   version: "1.0.0"
-  #   # project_id: "optional-project-id"
-  
-  # "AnotherPlugin":
-  #   source: "github"
-  #   version: "2.0.0"
-  #   repo: "Owner/Repo"
-  #   # asset_pattern: "plugin-*.jar"
-  
-  # "HangarPlugin":
-  #   source: "hangar"
-  #   version: "1.0.0"
-  #   project_slug: "Owner/Slug"
-  
-  # "SpigotMCPlugin":
-  #   source: "spigotmc"
-  #   version: "1.0.0"
-  #   resource_id: 12345
-  #   # or: resource_name: "PluginName"
-  
-  # "LocalPlugin":
-  #   source: "local"
-  #   version: "1.0.0"
-  #   path: "/path/to/plugins"
-  #   # pattern: "Plugin-(\\d+\\.\\d+\\.\\d+)\\.jar"
-  
-  # "CustomPlugin":
-  #   source: "custom"
-  #   version: "1.0.0"
-  #   url: "https://api.example.com/plugin/latest"
-  #   version_path: "$.version"
-  #   download_url_path: "$.url"
-  #   checksum_path: "$.sha256"
+# The key is the plugin name as shown by /plugins. Every entry needs "source".
+# "version" is informational; the installed version is read from the server.
+# Optional for every entry: min_version, max_version, repo (GitHub owner/repo for security advisories).
+#
+# modrinth:  project_id (optional - the installed jar is identified by its SHA-512 hash),
+#            loaders, game_versions, version_types
+# github:    repo: owner/repo, asset_pattern: "Plugin-*.jar", include_prereleases, signatures
+# hangar:    project_slug: ViaVersion, channel
+# spigotmc:  resource_id: 12345 (number from the spigotmc.org URL) or resource_name (exact, unique)
+# local:     path: /dir/or/file.jar, pattern: "MyPlugin-(.+)\\.jar"
+# custom:    url, version_path, download_url_path, checksum_path, headers, auth, allow_http
+#
+# Examples (see docs/config.example.yml for more):
+#
+#   LuckPerms:
+#     source: modrinth
+#   ViaVersion:
+#     source: hangar
+#     project_slug: ViaVersion
+#     repo: ViaVersion/ViaVersion
+#   ProtocolLib:
+#     source: github
+#     repo: dmulloy2/ProtocolLib
+#     asset_pattern: "ProtocolLib.jar"
+#   EssentialsX:
+#     source: github
+#     repo: EssentialsX/Essentials
+#     asset_pattern: "EssentialsX-2*.jar"
+#
+# Run "/updateplugins discover" to get suggestions for your installed plugins.
+plugins: {}

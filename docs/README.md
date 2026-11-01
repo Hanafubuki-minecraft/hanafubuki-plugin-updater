@@ -1,24 +1,16 @@
 # Documentation
 
-This directory contains all documentation for the Hanafubuki Plugin Updater.
+Documentation of Hanafubuki Plugin Updater 1.5.0. Start with [index.md](index.md).
 
-## Files
+| File | Contents |
+|---|---|
+| [index.md](index.md) | Overview, quick start, commands, permissions (with LuckPerms examples), GUI, files |
+| [configuration.md](configuration.md) | Every config option, plugin entries per source, notification / log / health formats |
+| [config.example.yml](config.example.yml) | Filled-in configuration using every source (checked by `DefaultConfigTest`) |
+| [architecture.md](architecture.md) | Packages, threads, update run, staging, `state.json`, backups and rollback, scheduler, discovery |
+| [api.md](api.md) | How Modrinth, GitHub, Hangar, Spiget, local and custom sources work; HTTP layer and rate limits |
+| [security.md](security.md) | Threat model, mitigations, what is not protected |
+| [development.md](development.md) | Layout, build, unit and contract tests, CI, releases, adding a source |
+| [roadmap.md](roadmap.md) | Implemented features, changelog 1.2.2 → 1.5.0, future ideas |
 
-| File | Description |
-|------|-------------|
-| [index.md](index.md) | Documentation index and quick reference |
-| [architecture.md](architecture.md) | System architecture, components, data flow, concurrency |
-| [configuration.md](configuration.md) | Complete configuration reference with examples |
-| [api.md](api.md) | Modrinth & GitHub API integration details |
-| [development.md](development.md) | Build, test, release workflow, contribution guide |
-| [config.example.yml](config.example.yml) | Ready-to-use configuration template |
-
-## Mermaid Diagrams
-
-All `.md` files contain Mermaid diagrams for visual documentation:
-- **architecture.md**: System architecture, sequence diagrams, flowcharts, concurrency model
-- **configuration.md**: Mode selection flow, version filter logic, version comparison algorithm
-- **api.md**: API request flows, rate limit handling, HTTP client class diagram
-- **development.md**: Build process, release workflow
-
-Render with any Markdown viewer that supports Mermaid (GitHub, GitLab, VS Code with extension, etc.).
+Diagrams are written in Mermaid and render on GitHub.

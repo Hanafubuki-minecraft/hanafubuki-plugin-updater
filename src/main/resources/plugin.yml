@@ -1,15 +1,74 @@
 name: HanafubukiPluginUpdater
 main: com.hanafubuki.updater.PluginUpdater
-version: ${version}
-api-version: 1.21
+version: '${version}'
+api-version: '1.21'
 author: Hanafubuki Team
-description: Automatically updates plugins from Modrinth and GitHub sources
+description: Keeps plugins up to date from Modrinth, GitHub, Hangar, SpigotMC and custom sources
+website: https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater
+
 commands:
   updateplugins:
-    description: Update plugins from Modrinth and GitHub
-    usage: /updateplugins [--dry-run|reload|discover|metrics]
-    permission: hanafubuki.updater.update
+    description: Check, download and roll back plugin updates
+    usage: /updateplugins help
+    aliases: [pluginupdater, hpu]
+    permission: hanafubuki.updater.use
+
+# Every node defaults to op. Grant or revoke single nodes with LuckPerms, e.g.
+#   /lp group moderator permission set hanafubuki.updater.check true
 permissions:
+  hanafubuki.updater.*:
+    description: Everything the plugin updater offers
+    default: op
+    children:
+      hanafubuki.updater.use: true
+      hanafubuki.updater.check: true
+      hanafubuki.updater.update: true
+      hanafubuki.updater.stop: true
+      hanafubuki.updater.status: true
+      hanafubuki.updater.stats: true
+      hanafubuki.updater.metrics: true
+      hanafubuki.updater.rollback: true
+      hanafubuki.updater.discover: true
+      hanafubuki.updater.reload: true
+      hanafubuki.updater.notifytest: true
+      hanafubuki.updater.gui: true
+      hanafubuki.updater.notify: true
+  hanafubuki.updater.use:
+    description: Use /updateplugins at all (each sub-command needs its own node too)
+    default: op
+  hanafubuki.updater.check:
+    description: Check for updates without downloading (check, update --dry-run)
+    default: op
   hanafubuki.updater.update:
-    description: Allows users to run the plugin update command
+    description: Download and stage updates (update)
+    default: op
+  hanafubuki.updater.stop:
+    description: Cancel a running check (stop)
+    default: op
+  hanafubuki.updater.status:
+    description: See status, staged updates and schedule (status)
+    default: op
+  hanafubuki.updater.stats:
+    description: See per-plugin update statistics (stats)
+    default: op
+  hanafubuki.updater.metrics:
+    description: See counters (metrics)
+    default: op
+  hanafubuki.updater.rollback:
+    description: List backups, roll back and remove staged updates (backups, rollback, unstage)
+    default: op
+  hanafubuki.updater.discover:
+    description: Find and add installed plugins missing from config.yml (discover)
+    default: op
+  hanafubuki.updater.reload:
+    description: Reload config.yml (reload)
+    default: op
+  hanafubuki.updater.notifytest:
+    description: Send a test Discord/webhook notification (notify test)
+    default: op
+  hanafubuki.updater.gui:
+    description: Open the menu (gui)
+    default: op
+  hanafubuki.updater.notify:
+    description: Receive in-game messages about updates and security advisories
     default: op
