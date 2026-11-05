@@ -149,6 +149,11 @@ as `CANCELLED` and are not recorded in the statistics. Temporary files are remov
 
 ## Staging (Installer)
 
+The installed jar comes from `ServerPlugins.jarOf()`. Paper runs Spigot-mapped plugins (GSit, for example)
+from a remapped copy in `plugins/.paper-remapped/`; `util/PluginJars.original()` maps that copy back to the
+original jar in `plugins/`, which is what gets hashed (Modrinth/Hangar identification) and replaced. A plugin
+whose original is not in `plugins/` (added with `-add-plugin`) is not updated.
+
 ```mermaid
 sequenceDiagram
     participant UM as UpdateManager

@@ -174,9 +174,27 @@ class GitHubSourceTest {
     }
 
     @Test
-    void missingLatestReleaseGivesEmpty() throws IOException {
-        // No route: the fake server answers 404 like GitHub for repos without releases.
-        assertEquals(Optional.empty(), source().findLatest(request(Map.of())));
+    void repositoryWithoutReleasesIsExplained() {
+        // GitHub answers 404 for /releases/latest when there is no release; the repository itself exists.
+        server.json(API, "{\"full_name\":\"" + REPO + "\"}");
+
+        IOException e = assertThrows(IOException.class, () -> find(Map.of()));
+        assertTrue(e.getMessage().contains("has no published release"), e.getMessage());
+    }
+
+    @Test
+    void missingOrPrivateRepositoryWithoutTokenSuggestsAToken() {
+        // No routes: both the release and the repository answer 404, like a private repository without a token.
+        IOException e = assertThrows(IOException.class, () -> find(Map.of()));
+        assertTrue(e.getMessage().contains("was not found") && e.getMessage().contains("set github.token"), e.getMessage());
+    }
+
+    @Test
+    void missingRepositoryWithTokenSuggestsCheckingAccess() {
+        IOException e = assertThrows(IOException.class,
+                () -> source("ghp_x", GitHubSource.SignatureMode.OFF).findLatest(request(Map.of())));
+        assertTrue(e.getMessage().contains("was not found") && e.getMessage().contains("can read this repository"),
+                e.getMessage());
     }
 
     @Test
@@ -225,12 +243,15 @@ class GitHubSourceTest {
     }
 
     @Test
-    void onlyDraftsGiveEmpty() throws IOException {
+    void onlyDraftsMeanNoPublishedRelease() {
         JsonObject draft = release("v3.0.0", "", false, asset("Plugin-3.0.0.jar", null));
         draft.addProperty("draft", true);
         server.json(API + "/releases", arr(draft).toString());
+        server.json(API, "{\"full_name\":\"" + REPO + "\"}");
 
-        assertEquals(Optional.empty(), source().findLatest(request(Map.of("include_prereleases", true))));
+        IOException e = assertThrows(IOException.class,
+                () -> source().findLatest(request(Map.of("include_prereleases", true))));
+        assertTrue(e.getMessage().contains("has no published release"), e.getMessage());
     }
 
     // --- checksums ---------------------------------------------------------------------------

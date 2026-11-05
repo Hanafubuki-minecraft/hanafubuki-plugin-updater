@@ -99,6 +99,10 @@ The plugin was rewritten. Configs from 1.2.x keep working: the same sections and
 - Unquoted `off` and `4:30` in YAML (read as `false` and `270`) are understood.
 - Server locale no longer changes JSON output or messages (`Locale.ROOT` everywhere; Turkish locale broke
   webhook JSON).
+- Plugins that Paper remaps (Spigot-mapped plugins such as GSit) were checked through the remapped copy
+  in `plugins/.paper-remapped/`, so Modrinth could not identify them; the original jar is used now.
+- GitHub repositories without releases or private repositories without a token now give a clear message
+  instead of retrying the default branch and spending the API rate limit.
 - Found while testing the rewrite: a cancelled run with queued plugins hung forever; a new run was refused
   right after the previous one finished; Discord messages over 6000 characters were rejected; reloading
   could block the main thread for up to 5 seconds.

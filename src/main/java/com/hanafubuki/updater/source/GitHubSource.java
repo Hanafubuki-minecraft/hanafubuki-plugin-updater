@@ -143,7 +143,7 @@ public final class GitHubSource implements UpdateSource {
 
         Optional<JsonObject> release = prereleases ? newestRelease(repo) : latestRelease(repo);
         if (release.isEmpty()) {
-            return Optional.empty();
+            explainMissingRelease(repo);
         }
         JsonObject rel = release.get();
         String tag = Json.str(rel, "tag_name");
@@ -210,6 +210,24 @@ public final class GitHubSource implements UpdateSource {
             }
         }
         return Optional.empty();
+    }
+
+    /**
+     * GitHub answers 404 both for "no release" and for "repository not found or private".
+     * Tells the two apart so the admin knows what to fix.
+     */
+    private void explainMissingRelease(String repo) throws IOException {
+        HttpService.Response r = http.get(URI.create(baseUrl + "/repos/" + repo), apiHeaders(), settings.source().apiTimeout());
+        if (r.status() == 404) {
+            boolean hasToken = settings.token() != null && !settings.token().isBlank();
+            throw new IOException("GitHub repository " + repo + " was not found" + (hasToken
+                    ? ". Check the name, and that github.token can read this repository"
+                    : ". If it is private, set github.token to a token that can read it"));
+        }
+        checkStatus(r, repo);
+        throw new IOException("GitHub repository " + repo + " has no published release"
+                + (settings.includePrereleases() ? "" : " (pre-releases are ignored unless include_prereleases: true)")
+                + ". Publish a release with the plugin jar attached");
     }
 
     private static void checkStatus(HttpService.Response r, String repo) throws IOException {

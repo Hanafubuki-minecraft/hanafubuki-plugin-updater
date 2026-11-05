@@ -138,6 +138,15 @@ Every action checks the same permission as the matching command. Items cannot be
 | `plugins/HanafubukiPluginUpdater/backups/<Plugin>/<version>__<epochMillis>.jar` | backups |
 | `plugins/update/` (Bukkit `settings.update-folder`) | staged updates, applied by Paper on restart |
 
+## Troubleshooting
+
+| Message | Meaning |
+|---|---|
+| `GitHub repository X was not found. If it is private, set github.token ...` | The repository name is wrong, or it is private. Private repositories need `github.token` with read access. |
+| `GitHub repository X has no published release` | The repository exists but has no release (drafts and, by default, pre-releases do not count). Publish a release with the jar attached. |
+| `GitHub API rate limit reached ...` | Without a token GitHub allows 60 requests per hour per IP. Set `github.token`. |
+| `The installed jar is not a file published on Modrinth` | The jar was not downloaded from Modrinth (or was modified). Set `project_id` in the plugin entry. |
+
 ## Links
 
 - Repository: <https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater>
