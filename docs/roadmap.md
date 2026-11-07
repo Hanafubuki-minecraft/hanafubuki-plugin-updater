@@ -52,6 +52,13 @@ Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
 
 ## Changelog
 
+### 1.5.2
+
+**Fixed**
+
+- When Modrinth has separate builds of the same version per loader (BlueMap `5.16-paper` and `5.16-spigot`),
+  the build for the first loader in `modrinth.loaders` is used, so Paper servers get the Paper build.
+
 ### 1.5.1
 
 **Fixed**
@@ -62,8 +69,6 @@ Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
   (HTTP 401) each get a clear message instead of retries that used up the API rate limit.
 - Modrinth projects that publish only beta versions (Geyser) report which `version_types` to set.
 - Jars downloaded from other sites get a hint to set `project_id`.
-- When Modrinth has separate builds of the same version per loader (BlueMap `5.16-paper` and `5.16-spigot`),
-  the build for the first loader in `modrinth.loaders` is used, so Paper servers get the Paper build.
 
 ### 1.5.0
 

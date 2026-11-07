@@ -184,7 +184,7 @@ plugins:
 Версия плагина хранится в одном месте — [`gradle.properties`](gradle.properties):
 
 ```properties
-version=1.5.1
+version=1.5.2
 ```
 
 Поднимите её и запушьте в `master` → GitHub Actions соберёт jar и опубликует релиз `v<version>` с автоматическими заметками.
