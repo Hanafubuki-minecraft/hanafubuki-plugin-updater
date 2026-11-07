@@ -138,29 +138,32 @@ check.
 
 | Key | Default | Meaning |
 |---|---|---|
-| `in_game` | `true` | Message online players that have `hanafubuki.updater.notify` (op by default). |
+| `in_game` | `true` | Message online players that have `hanafubuki.updater.notify` (op by default) about updates and advisories, and players with `hanafubuki.updater.confirm` about found plugins. |
 | `on_join` | `true` | Remind those players when they join. |
 | `server_name` | `"Hanafubuki"` | Name used in Discord and webhook messages. If the key is missing entirely, `Minecraft server` is used. |
 
 ### In-game
 
-With `in_game: true`, `ResultReporter` sends, as soon as each plugin is done:
+With `in_game: true`, `ResultReporter` sends to players with `hanafubuki.updater.notify`, as soon as each
+plugin is done:
 
 - for every staged update: **`Plugin <name> updated, try restarting (<old> → <new>)`**;
 - for every security advisory that affects an installed version: a line with severity, summary, GHSA id and
-  patched versions;
-- when automatic detection finds plugins that wait for confirmation: `New plugin(s) found: A, B. They wait for
-  confirmation. [review]` (click runs `/updateplugins pending`).
+  patched versions.
+
+When automatic detection finds plugins that wait for confirmation (new, or with a changed source), players
+with `hanafubuki.updater.confirm` get `New plugin(s) found: A, B. They wait for confirmation. [review]` (click
+runs `/updateplugins pending`).
 
 The player who started a run (command or GUI) additionally gets a summary and one line for every plugin
 that is not up to date when the run ends.
 
-With `on_join: true`, players with `hanafubuki.updater.notify` get on join:
+With `on_join: true`, players get on join:
 
-- `N new plugin(s) found, waiting for confirmation: A, B [review]`;
-- `N plugin update(s) wait for a restart: A, B` (read from `state.json`, so this survives restarts until the
-  update is applied);
-- the security advisories found by the last run since the server started.
+- with `hanafubuki.updater.confirm`: `N new plugin(s) found, waiting for confirmation: A, B [review]`;
+- with `hanafubuki.updater.notify`: `N plugin update(s) wait for a restart: A, B` (read from `state.json`, so
+  this survives restarts until the update is applied);
+- with `hanafubuki.updater.notify`: the security advisories found by the last run since the server started.
 
 ### Discord
 
@@ -337,8 +340,9 @@ Automatic detection writes one `plugins_detected` line when it changed something
 {"time":"2026-10-31T01:29:59.871Z","event":"plugins_detected","pending":["LuckPerms"],"unidentified":["MyLocalPlugin"],"removed":[]}
 ```
 
-`pending`: plugins that now wait for confirmation; `unidentified`: new plugins without a source; `removed`:
-undecided plugins that were uninstalled or now have a config.yml entry. Without `json_format` the same is
+`pending`: plugins that now wait for confirmation (new, or with a changed source); `unidentified`: new plugins
+without a source; `removed`: entries that were dropped because the plugin was uninstalled or is now in
+config.yml or `modes.exclude_list`. Without `json_format` the same is
 written as text lines.
 
 ## `style`
@@ -434,7 +438,8 @@ Keys every entry understands:
 An entry with an invalid option (wrong format, missing required key) fails its check with
 `invalid config: …` and does not affect other plugins. How each source works in detail: [api.md](api.md).
 
-An entry here always wins over a plugin with the same name in `plugins.json` (case-insensitive).
+An entry here always wins over a plugin with the same name in `plugins.json` (case-insensitive), even when
+the entry itself has errors.
 
 ### `modrinth`
 
@@ -568,7 +573,10 @@ menu (**Found plugins**). The three files have separate owners:
 
 The tracked plugins are the config.yml entries plus the **confirmed** plugins.json entries. On the same name
 (case-insensitive) config.yml wins, so writing an entry by hand is always the way to override what was found.
-Runs, `status`, the GUI, tab completion, `/health` and the metrics all use this combined list.
+This counts every name under `plugins:`, also an entry with errors (unknown or missing `source`, not a
+section): such a name is skipped by detection and blocks a plugins.json entry of the same name, and the error
+is reported as a config problem. Runs, `status`, the GUI, tab completion, `/health` and the metrics all use
+the combined list.
 
 **When detection runs**: one tick after startup, before every scheduled check (trigger `schedule`, not the
 `check_on_startup` run) and after `/updateplugins reload`, when `global.auto_detect` is on; and on
@@ -576,12 +584,18 @@ Runs, `status`, the GUI, tab completion, `/health` and the metrics all use this 
 confirmation.
 
 **What it looks at**: every loaded plugin jar except the updater itself, minus names under `plugins:` and in
-`modes.exclude_list`. A new plugin is looked up the same way for every source (lookups run on a background
-thread):
+`modes.exclude_list`. A plugin is looked up the same way for every source (lookups run on their own thread,
+`HanafubukiUpdater-detect`; a detection requested while one runs, e.g. by a reload, runs right after it):
 
 1. the installed jar's SHA-512 on Modrinth: the file itself is published there → `modrinth` with `project_id`;
 2. the `website` in plugin.yml / paper-plugin.yml: a Modrinth, Hangar, SpigotMC resource or GitHub repository
    page → that source with `project_id`, `project_slug`, `resource_id` or `repo`.
+
+If a Modrinth lookup fails (network or API error), the remaining plugins of that detection are not sent to
+Modrinth; they get the website result and are marked `retry`. A plugin whose Modrinth lookup failed but whose
+website names a source becomes `pending` with that source and `retry`: the next detection looks it up again
+and replaces the website guess with the exact Modrinth match if there is one (ops are told again, because the
+source changed).
 
 A GitHub suggestion has no `asset_pattern`; if the releases contain several jars the first check fails and
 asks for one (write a config.yml entry with `asset_pattern`).
@@ -595,10 +609,16 @@ asks for one (write a config.yml entry with `asset_pattern`).
 | `rejected` | rejected (or hidden) with `reject` or the menu; can be confirmed later | no |
 | `unidentified` | no source found. Cannot be confirmed: add a config.yml entry instead | no |
 
-- Known plugins are not looked up again. An `unidentified` plugin is looked up again when its installed
-  version changes, when the last lookup failed for a network reason, or on `/updateplugins discover`.
-- `pending` and `unidentified` entries are removed when the plugin is uninstalled or gets a config.yml entry
-  (or is added to `exclude_list`). `confirmed` and `rejected` entries are kept, so the decision survives.
+- Confirmed and rejected plugins are not looked up again. An `unidentified` plugin is looked up again when
+  its installed version changes, when its last lookup failed (`retry`), or on `/updateplugins discover`. A
+  `pending` plugin is looked up again when it has `retry`, or on `/updateplugins discover`. A `pending` plugin
+  never loses a source it had: a later lookup that finds nothing keeps the old one. An unchanged result is
+  not reported as new.
+- Any entry, whatever its status, is removed when the plugin gets a config.yml entry or is put in
+  `modes.exclude_list`.
+- Entries of plugins that are no longer installed are removed too, **including confirmed ones**: a
+  confirmation belongs to the installed plugin, and a jar with the same name installed later is reviewed
+  again. Only `rejected` entries of uninstalled plugins are kept.
 - `confirm all` confirms every `pending` plugin.
 
 Example:
@@ -635,11 +655,13 @@ Example:
 | `reason` | how the source was found, or why not |
 | `version` | installed version when the plugin was last looked at |
 | `discovered_at`, `decided_at`, `decided_by` | when it was found, when and by whom (player name or `console`) it was confirmed or rejected |
-| `retry` | `true` if the last lookup failed for a network reason; the next detection tries again |
+| `retry` | `true` if the last Modrinth lookup failed; the next detection tries again |
 
-The file is written atomically (temporary file, then rename). If it cannot be read, it is moved to
-`plugins.json.broken` and the updater starts with an empty list (found plugins are looked up again and wait
-for a new decision).
+The file is written atomically (temporary file, then rename). It is read entry by entry: an entry that is not
+an object or has an unknown status is ignored (the plugin is looked up again), an option value that is not a
+string, number or boolean is dropped. Only a file that cannot be read as a whole (not valid JSON, or not a
+JSON object) is moved to `plugins.json.broken`; the updater then starts with an empty list (found plugins are
+looked up again and wait for a new decision).
 
 ## Which plugins are checked
 

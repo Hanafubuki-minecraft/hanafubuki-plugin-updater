@@ -13,7 +13,7 @@ The code is split into a **core** that does not use the Bukkit API (unit tested 
 |---|---|---|
 | `com.hanafubuki.updater` | Paper | `PluginUpdater` (lifecycle, wiring, `startRun`, `reload`, `detect`, `settings()` = config.yml + confirmed found plugins), `UpdateScheduler`, `JoinListener`, `ServerPlugins` (snapshot of loaded plugins, detection candidates, update folder, Minecraft version), `Permissions` |
 | `command` | Paper | `UpdateCommand`: `/updateplugins` sub-commands and tab completion |
-| `gui` | Paper | `UpdaterMenu` (inventory menu: plugins, backups, found plugins), `MenuListener` (makes menus read-only, forwards clicks one tick later) |
+| `gui` | Paper | `UpdaterMenu` (inventory menu: plugins, backups, found plugins), `MenuListener` (makes menus read-only, forwards plain mouse clicks one tick later) |
 | `console` | Paper | `Messages` (MiniMessage styles), `ResultReporter` (console lines or JSON, in-game messages, detection results) |
 | `config` | core + Paper | `SettingsParser` → `UpdaterSettings` (`withDetected` merges confirmed found plugins), `PluginEntry` (core); `ConfigManager` (Bukkit YAML loading, read-only) |
 | `manager` | core | `UpdateManager` (the engine), `Installer`, `BackupManager`, `StateStore`, `DependencyChecker`, `Schedule`, `Metrics`, `RunOptions`, `PluginResult`, `UpdateReport`, `UpdateListener` |
@@ -63,7 +63,8 @@ with `auto_detect` and a valid config, runs the detection. `plugins.json` is not
 `Metrics` are carried over.
 
 `onDisable`: stops the schedule, cancels the active run and waits up to 5 s, stops the health endpoint, lets
-queued notifications finish (up to 5 s), stops the background thread.
+queued notifications finish (up to 5 s), stops the detection thread, shuts down the HTTP client and stops the
+background thread (waiting up to 3 s).
 
 ## Threads
 
@@ -72,7 +73,8 @@ queued notifications finish (up to 5 s), stops the background thread.
 | Server main thread | Commands, GUI, scheduler ticks. Takes the snapshot of loaded plugins (`ServerPlugins.snapshot()`, `candidates()`), sends messages. No network I/O; the only file write is `plugins.json` on confirm / reject (a few KB). |
 | `HanafubukiUpdater-run` | Coordinator of one run (`UpdateManager.execute`). |
 | `HanafubukiUpdater-worker-N` | Pool of `global.parallelism` threads; one plugin check each. |
-| `HanafubukiUpdater-background` | Backups listing, rollback, unstage, staged-update reconciliation at startup, detection lookups. Exits after 30 s without work and starts again on demand (`Threads.lazySingle`). |
+| `HanafubukiUpdater-background` | Backups listing, rollback, unstage, staged-update reconciliation at startup. Exits after 30 s without work and starts again on demand (`Threads.lazySingle`). |
+| `HanafubukiUpdater-detect` | Plugin detection and its Modrinth lookups, on its own thread so slow lookups never delay backups, rollback, unstage or the reconciliation. Exits after 30 s without work like the background thread. |
 | `HanafubukiUpdater-notify` | Discord / webhook POSTs. Exits after 30 s without work like the background thread. |
 | `HanafubukiUpdater-health` | Health endpoint requests. |
 
@@ -224,16 +226,19 @@ plugin starts with an empty state.
 
 - Before an update is downloaded, the running jar is copied there (skipped if an identical copy exists).
   Only the newest `backups.keep` copies per plugin are kept.
-- `/updateplugins rollback <plugin> [version]` (or a click in the GUI backups view) checks that the backup is
-  a valid jar of that plugin and copies it into the update folder under the installed jar's name, replacing
-  any staged update. Paper installs it on the next restart. Without a version the newest backup is used.
+- `/updateplugins rollback <plugin> [version]` (the version may contain spaces), or a click in the GUI
+  backups view, checks that the backup is a valid jar of that plugin and copies it into the update folder
+  under the installed jar's name, replacing any staged update. Paper installs it on the next restart. Without
+  a version the newest backup is used; a click in the GUI restores exactly the clicked file, even if several
+  backups share a version.
 - After a rollback the plugin is **held**: automatic and manual runs skip it, so the next scheduled run does
   not reinstall the version you rolled back from.
 - `/updateplugins unstage <plugin>` deletes the plugin's file from the update folder, clears the staged record
   and releases the hold. Run it **after** the restart to resume updates; before the restart it would also
   remove the staged rollback.
 
-Rollback and unstage are refused while a run is active.
+Rollback and unstage are refused while a run is active; they check this again when the background task
+actually runs.
 
 ## Scheduler
 
@@ -249,15 +254,17 @@ With `check_only: true` scheduled runs are dry runs.
 
 `PluginUpdater.detect(requester, force)` is started on the main thread: one tick after startup, before every
 scheduled run, after `reload()` (all three only with `global.auto_detect`) and by `/updateplugins discover`
-(with `force`). Only one detection runs at a time. The main thread takes `ServerPlugins.candidates()` (every
-loaded plugin from a jar except the updater itself) and the names to skip (config.yml `plugins:` and
-`modes.exclude_list`); everything else runs on the background thread.
+(with `force`). Only one detection runs at a time; one requested meanwhile (e.g. by a reload) makes one more
+detection run right after the current one finishes (with `auto_detect`). The main thread takes
+`ServerPlugins.candidates()` (every loaded plugin from a jar except the updater itself) and the names to skip:
+every name under config.yml `plugins:` (`UpdaterSettings.configuredNames()`, including entries with errors)
+and `modes.exclude_list`. Everything else runs on the `HanafubukiUpdater-detect` thread.
 
 `PluginRegistry.detect()` keeps the lock off the network:
 
-1. `toLookUp()` (locked): new plugins, and `unidentified` ones whose installed version changed, whose last
-   lookup failed for a network reason (`retry`), or all of them with `force`. Known plugins are not looked up
-   again.
+1. `toLookUp()` (locked): new plugins; `unidentified` ones whose installed version changed or whose last
+   lookup failed (`retry`); `pending` ones with `retry`; with `force` every `unidentified` and `pending` one.
+   Confirmed and rejected plugins are not looked up again.
 2. `PluginDiscovery.discover()` (not locked) looks for evidence per plugin:
    1. The installed jar's SHA-512 on Modrinth (`ModrinthSource.projectIdOf`). Exact: the file itself is
       published there → `source: modrinth, project_id: <id>`.
@@ -265,34 +272,45 @@ loaded plugin from a jar except the updater itself) and the names to skip (confi
       `modrinth.com/plugin|mod|project/<slug>` → modrinth, `hangar.papermc.io/<Owner>/<Slug>` → hangar,
       `spigotmc.org/resources/<name>.<id>` → spigotmc, `github.com/<owner>/<repo>` → github. Reserved paths
       (`github.com/sponsors/…`, `hangar.papermc.io/api/…` and similar) are ignored.
-3. `apply()` (locked) stores a plugin with evidence as `pending`, without as `unidentified` (with `retry` when
-   the Modrinth lookup failed and the website gave nothing). A plugin decided meanwhile keeps its decision.
-   `pending` and `unidentified` entries of plugins that are no longer loaded or are now skipped are removed;
-   `confirmed` and `rejected` ones are kept. The file is written only if something changed.
+
+   After the first failed Modrinth lookup the remaining plugins of this detection are not sent to Modrinth
+   (circuit breaker); they get the website result and are marked `retry`. A Modrinth failure always sets
+   `retry`, also when the website gave a source.
+3. `apply()` (locked) stores a plugin with evidence as `pending`, without as `unidentified`. A plugin decided
+   meanwhile keeps its decision. A `pending` plugin never loses its source: a later lookup that finds nothing
+   only sets `retry`. A retry that finds the exact Modrinth match replaces a website guess and is reported as
+   new `pending` again (the source changed); an unchanged result is not reported. Then entries are removed:
+   any entry whose name is now skipped (config.yml or `exclude_list`), and every entry except `rejected` ones
+   of a plugin that is no longer loaded (a confirmation belongs to the installed plugin; a new jar with the
+   same name is reviewed again). The file is written only if something changed.
 
 `ResultReporter.onDetection()` writes the changes to the console (or a `plugins_detected` JSON line), sends
-players with `hanafubuki.updater.notify` a message with a clickable `[review]` when plugins are new
+players with `hanafubuki.updater.confirm` a message with a clickable `[review]` when plugins are new
 `pending`, and answers the player who ran `discover`.
 
 Decisions (`confirm`, `confirm all`, `reject`, the found plugins view of the GUI) change the registry on the
-calling thread and save it at once. `unidentified` plugins cannot be confirmed. Every change raises the
+calling thread and save it at once. `unidentified` plugins cannot be confirmed. GUI actions call the same
+command code directly (not `performCommand`), with the same permission checks. Every change raises the
 registry's revision; `PluginUpdater.settings()` caches `UpdaterSettings.withDetected(registry.confirmed())`
 and rebuilds it only when the revision or the config.yml settings change.
 
-`plugins.json` is written through `AtomicFiles` (temporary file + rename). A file that cannot be parsed is
-moved to `plugins.json.broken` and the registry starts empty; an entry with an unknown status is dropped and
-looked at again, one with an unknown source loses its source (and becomes `unidentified` unless it was rejected). The format is in
+`plugins.json` is written through `AtomicFiles` (temporary file + rename). It is read entry by entry: an entry
+that is not an object or has an unknown status is dropped (and looked at again), an option value that is not
+a scalar (a list, an object) is dropped, an unknown source is removed (the entry becomes `unidentified` unless
+it was rejected). Only a file that cannot be read as a whole (not valid JSON, or not a JSON object) is moved
+to `plugins.json.broken`, and the registry then starts empty. The format is in
 [configuration.md → Found plugins](configuration.md#found-plugins-pluginsjson).
 
 ## Caches
 
-- **HTTP responses** (`HttpCache.inMemory`): LRU of at most 512 responses **and** about 8 MB of response text
-  (`DEFAULT_MAX_CHARS`); a body longer than a quarter of that budget is not cached. Used for conditional
-  requests (`ETag` / `Last-Modified`, see [api.md](api.md#http-layer)). Lost on restart.
+- **HTTP responses** (`HttpCache.inMemory`): LRU of at most 512 responses **and** 4 million characters of
+  response text (`DEFAULT_MAX_CHARS`, 4–8 MB of memory: two bytes per character for non-Latin-1 text); a body
+  longer than a quarter of that budget is not cached. Used for conditional requests (`ETag` / `Last-Modified`,
+  see [api.md](api.md#http-layer)). Lost on restart.
 - **Hashes of installed jars** (`Checksum.hashCached`): SHA-512 (Modrinth identification, detection) and
-  SHA-256 (local source) of a jar, keyed by path, size and modification time, at most 256 entries. Installed
-  jars only change on a restart, so a check does not re-read large jars every time. Downloads are always
-  hashed fresh.
+  SHA-256 (Hangar and local identical-file checks) of a jar, keyed by path, size and modification time, at
+  most 256 entries. Installed jars only change on a restart, so a check does not re-read large jars every
+  time. Downloads are always hashed fresh.
 - **Tracked plugins**: `PluginUpdater.settings()`, see above.
 
 ## Extending

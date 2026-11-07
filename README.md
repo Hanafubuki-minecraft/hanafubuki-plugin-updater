@@ -41,9 +41,9 @@ and Paper swaps them in on the next restart.
 1. Download the latest `.jar` from [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest).
 2. Put it into `plugins/` and restart the server — `plugins/HanafubukiPluginUpdater/config.yml` is created.
    It tracks no plugins yet.
-3. The updater looks for installed plugins on its own (`global.auto_detect: true`) and ops get a message with
-   a clickable `[review]`. Run `/updateplugins pending`, then `/updateplugins confirm <plugin>` (or `confirm all`)
-   for the ones to update, `reject <plugin>` for the rest — or use the menu → **Found plugins**.
+3. The updater looks for installed plugins on its own (`global.auto_detect: true`) and ops
+   (`hanafubuki.updater.confirm`) get a message with a clickable `[review]`. Run `/updateplugins pending`,
+   then `/updateplugins confirm <plugin>` (or `confirm all`) for the ones to update, `reject <plugin>` for the rest — or use the menu → **Found plugins**.
    Plugins without a source, or that you want to set up yourself, go into the `plugins:` section of config.yml
    (followed by `/updateplugins reload`).
 4. `/updateplugins check` to see what would change.
@@ -79,7 +79,8 @@ More detail and the GUI: [docs/index.md](docs/index.md).
 ## Permissions
 
 All nodes default to op; `hanafubuki.updater.*` grants everything. Besides the nodes in the table above,
-`hanafubuki.updater.notify` receives in-game update, security and "new plugin found" messages.
+`hanafubuki.updater.notify` receives in-game update and security messages; "new plugin found" messages and the
+reminder about plugins waiting for confirmation go to `hanafubuki.updater.confirm`.
 
 With LuckPerms:
 

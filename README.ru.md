@@ -41,9 +41,9 @@
 1. Скачайте последний `.jar` из [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest).
 2. Положите его в `plugins/` и перезапустите сервер — появится `plugins/HanafubukiPluginUpdater/config.yml`.
    Плагинов в нём пока нет.
-3. Апдейтер сам ищет установленные плагины (`global.auto_detect: true`), а опы получают сообщение с
-   кликабельным `[review]`. Выполните `/updateplugins pending`, затем `/updateplugins confirm <плагин>`
-   (или `confirm all`) для тех, что нужно обновлять, и `reject <плагин>` для остальных — или через меню →
+3. Апдейтер сам ищет установленные плагины (`global.auto_detect: true`), а опы
+   (`hanafubuki.updater.confirm`) получают сообщение с кликабельным `[review]`. Выполните
+   `/updateplugins pending`, затем `/updateplugins confirm <плагин>` (или `confirm all`) для тех, что нужно обновлять, и `reject <плагин>` для остальных — или через меню →
    **Found plugins**. Плагины без источника или те, что хотите настроить сами, добавьте в раздел `plugins:`
    в config.yml (и выполните `/updateplugins reload`).
 4. `/updateplugins check`, чтобы увидеть, что изменится.
@@ -79,7 +79,8 @@
 ## Права
 
 Все права по умолчанию у опов; `hanafubuki.updater.*` даёт всё. Кроме прав из таблицы выше,
-`hanafubuki.updater.notify` получает в игре сообщения об обновлениях, уязвимостях и найденных плагинах.
+`hanafubuki.updater.notify` получает в игре сообщения об обновлениях и уязвимостях; сообщения о найденных плагинах
+и напоминание о плагинах, ждущих подтверждения, получает `hanafubuki.updater.confirm`.
 
 С LuckPerms:
 

@@ -62,15 +62,20 @@ Everything planned for v1.1 to v1.5 is implemented since 1.5.0.
   are identified (Modrinth hash of the jar, then the plugin.yml `website`) and stored in the new
   `plugins.json` as `pending` or `unidentified`. Nothing found is updated until an op confirms it.
 - `plugins.json`: found plugins with status, source, options, how they were found, version, dates and who
-  decided. Written only by the updater, atomically; a broken file is kept as `plugins.json.broken`.
+  decided. Written only by the updater, atomically. Read entry by entry, so one broken entry loses only that
+  entry; a file that is not valid JSON is kept as `plugins.json.broken`.
 - `/updateplugins pending`, `confirm <plugin|all>`, `reject <plugin>` and the permission
   `hanafubuki.updater.confirm` (default op, part of `hanafubuki.updater.*`). Clickable `[confirm]`,
   `[reject]` and `[hide]` in chat.
 - GUI: **Found plugins** button (slot 46, a bell when plugins wait) and view (orange waiting, lime confirmed,
   red rejected, gray no source; left click confirm, right click reject, **Confirm all waiting**, **Search
   now**). Plugin items show whether they come from config.yml or plugins.json.
-- Players with `hanafubuki.updater.notify` get "New plugin(s) found … [review]" when detection finds plugins,
-  and on join the number of plugins waiting for confirmation.
+- Players with `hanafubuki.updater.confirm` get "New plugin(s) found … [review]" when detection finds plugins,
+  and on join the number of plugins waiting for confirmation. `hanafubuki.updater.notify` stays for update and
+  security messages.
+- Detection runs on its own thread (`HanafubukiUpdater-detect`), so slow lookups never delay backups,
+  rollback, unstage or the startup reconciliation. A detection requested while one runs (e.g. by a reload)
+  runs right after it.
 - `/health`: `plugins_pending`. JSON log event `plugins_detected`.
 
 **Changed**
@@ -78,14 +83,28 @@ Everything planned for v1.1 to v1.5 is implemented since 1.5.0.
 - config.yml belongs to the user: the plugin creates it on first start and never writes to it again. Its
   `plugins:` entries always win over plugins.json (case-insensitive name). Versions are kept only in
   `state.json`; `version` in plugin entries is informational and never written.
+- Every name under config.yml `plugins:` wins, also an entry with errors (unknown or missing source, not a
+  section): detection skips it and a plugins.json entry of the same name is not used.
 - Tracked plugins (runs, `status`, GUI, tab completion, `/health` `plugins_tracked`, metrics) = config.yml
   entries + confirmed plugins.json entries. `modes.include_only` / `exclude_list` apply to confirmed plugins
   too; `confirm` warns when a plugin is still filtered out.
-- `/updateplugins discover` searches now and looks up plugins without a source again; results go to
-  plugins.json. Unidentified plugins are also retried when their version changes or the last lookup failed
-  for a network reason.
+- `/updateplugins discover` searches now and looks up plugins without a source and waiting plugins again;
+  results go to plugins.json. Unidentified plugins are also looked up again when their version changes or the
+  last lookup failed. After the first failed Modrinth lookup a detection stops asking Modrinth and marks the
+  rest for a retry; a website guess made while Modrinth failed is replaced by the exact Modrinth match on the
+  next detection (ops are told again). A waiting plugin never loses a source it had.
+- plugins.json entries are removed when the plugin gets a config.yml entry or is put in
+  `modes.exclude_list`, and when it is uninstalled, also confirmed ones (a jar with the same name installed
+  later is reviewed again). Only rejected entries of uninstalled plugins are kept.
+- Tab completion of arguments (plugin names) only for senders with the sub-command's permission.
+- `rollback <plugin> <version>` accepts versions with spaces; rollback and unstage check again that no run is
+  active when they actually execute.
 - GUI clicks are handled one tick after the click event (Bukkit does not allow opening or closing inventories
-  inside it); this also prevents double actions.
+  inside it); this also prevents double actions. Only plain mouse clicks act (left, right, shift + left,
+  shift + right); Q, number keys, F, middle and double clicks do nothing. GUI actions call the command code
+  directly with the same permission checks. The Status button needs `hanafubuki.updater.status`, statistics
+  in plugin items need `hanafubuki.updater.stats`. A click in the backups view restores exactly that backup
+  file, even if several backups share a version.
 
 **Removed**
 
@@ -95,13 +114,16 @@ Everything planned for v1.1 to v1.5 is implemented since 1.5.0.
 
 **Performance**
 
-- The HTTP ETag cache is limited to about 8 MB of response text as well as 512 entries; bodies above a quarter
-  of that are not cached.
-- SHA-512 / SHA-256 of installed jars are cached by path, size and modification time, so checks no longer
-  re-hash large jars every time.
-- The background and notification threads exit after 30 s without work and start again on demand.
+- The HTTP ETag cache is limited to 4 million characters of response text (4–8 MB of memory) as well as 512
+  entries; bodies above a quarter of that are not cached.
+- Modrinth version lists are requested with `include_changelog=false` (much smaller answers).
+- SHA-512 / SHA-256 of installed jars are cached by path, size and modification time (Modrinth, Hangar, local
+  source, detection), so checks no longer re-hash large jars every time.
+- The background, detection and notification threads exit after 30 s without work and start again on
+  demand. The HTTP client is shut down when the plugin is disabled.
 - The startup reconciliation of staged updates does its file checks off the main thread; detection lookups
-  run on the background thread.
+  run on their own thread.
+- Statistics in the menu no longer parse the whole update history.
 
 **Breaking / migration**
 
