@@ -234,6 +234,10 @@ public final class GitHubSource implements UpdateSource {
         if (r.status() == 200) {
             return;
         }
+        if (r.status() == 401) {
+            throw new IOException("GitHub rejected github.token (HTTP 401 Bad credentials) while checking " + repo
+                    + ". The token is mistyped, expired or revoked; create a new one and run /updateplugins reload");
+        }
         if ((r.status() == 403 || r.status() == 429) && r.header("X-RateLimit-Remaining").orElse("").equals("0")) {
             throw new IOException("GitHub API rate limit reached while checking " + repo
                     + ". Set github.token in config.yml to get a higher limit");

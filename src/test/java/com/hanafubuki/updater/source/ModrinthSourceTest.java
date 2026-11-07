@@ -235,8 +235,12 @@ class ModrinthSourceTest {
 
     @Test
     void noUsableVersionGivesEmpty() throws IOException {
+        // Only beta versions (like Geyser on Modrinth): say so instead of a bare "no compatible version".
         versions("luckperms", version("B", "P", "2.0-beta", "beta", "2026-02-01T00:00:00Z", file("b.jar", true, sha512("b"))));
-        assertEquals(Optional.empty(), source().findLatest(request(Map.of("project_id", "luckperms"))));
+        NoVersionException e = assertThrows(NoVersionException.class,
+                () -> source().findLatest(request(Map.of("project_id", "luckperms"))));
+        assertTrue(e.getMessage().contains("only beta") && e.getMessage().contains("version_types: [release, beta]"),
+                e.getMessage());
 
         versions("luckperms");
         assertEquals(Optional.empty(), source().findLatest(request(Map.of("project_id", "luckperms"))));

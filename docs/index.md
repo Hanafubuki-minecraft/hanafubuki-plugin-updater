@@ -145,7 +145,9 @@ Every action checks the same permission as the matching command. Items cannot be
 | `GitHub repository X was not found. If it is private, set github.token ...` | The repository name is wrong, or it is private. Private repositories need `github.token` with read access. |
 | `GitHub repository X has no published release` | The repository exists but has no release (drafts and, by default, pre-releases do not count). Publish a release with the jar attached. |
 | `GitHub API rate limit reached ...` | Without a token GitHub allows 60 requests per hour per IP. Set `github.token`. |
-| `The installed jar is not a file published on Modrinth` | The jar was not downloaded from Modrinth (or was modified). Set `project_id` in the plugin entry. |
+| `The installed jar is not a file published on Modrinth` | The jar was downloaded from another site (SpigotMC, Hangar, GitHub) or modified. Set `project_id` to the slug from the plugin's `modrinth.com/plugin/<slug>` page. After the first update from Modrinth the hash is known and `project_id` is optional. |
+| `GitHub rejected github.token (HTTP 401 ...)` | The token is mistyped, expired or revoked. Create a new one, put it in `github.token`, run `/updateplugins reload`. |
+| `Modrinth has only beta versions of ...` | The project publishes no releases for your loader/version (Geyser, for example). Add `version_types: [release, beta]` to that plugin, or leave it to another updater. |
 
 ## Links
 

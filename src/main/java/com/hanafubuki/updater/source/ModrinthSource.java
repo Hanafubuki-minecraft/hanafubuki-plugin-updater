@@ -101,7 +101,8 @@ public final class ModrinthSource implements UpdateSource {
         String projectId = request.entry().string("project_id");
         if (projectId == null) {
             projectId = known.map(KnownVersion::projectId).orElseThrow(() -> new IOException(
-                    "The installed jar is not a file published on Modrinth. Set project_id to the Modrinth project id or slug"));
+                    "The installed jar is not a file published on Modrinth (downloaded from another site?). "
+                            + "Set project_id to the slug from the plugin's modrinth.com/plugin/<slug> page"));
         }
 
         List<String> loaders = orDefault(request.entry().list("loaders"), settings.loaders());
@@ -115,6 +116,7 @@ public final class ModrinthSource implements UpdateSource {
                 "Modrinth versions of " + projectId);
 
         List<JsonObject> usable = new ArrayList<>();
+        java.util.Set<String> skippedTypes = new java.util.TreeSet<>();
         for (JsonElement e : versions) {
             if (!e.isJsonObject()) {
                 continue;
@@ -122,6 +124,9 @@ public final class ModrinthSource implements UpdateSource {
             JsonObject v = e.getAsJsonObject();
             String type = Json.str(v, "version_type");
             if (type == null || versionTypes.stream().noneMatch(type::equalsIgnoreCase)) {
+                if (type != null) {
+                    skippedTypes.add(type.toLowerCase(Locale.ROOT));
+                }
                 continue;
             }
             if (pickJar(v) == null) {
@@ -130,6 +135,12 @@ public final class ModrinthSource implements UpdateSource {
             usable.add(v);
         }
         if (usable.isEmpty()) {
+            if (!skippedTypes.isEmpty()) {
+                // Geyser, for example, publishes only beta versions on Modrinth.
+                throw new NoVersionException("Modrinth has only " + String.join("/", skippedTypes) + " versions of " + projectId
+                        + " for " + String.join(", ", loaders) + " " + String.join(", ", gameVersions)
+                        + "; add version_types: [release, " + String.join(", ", skippedTypes) + "] to this plugin to use them");
+            }
             return Optional.empty();
         }
         usable.sort(Comparator.comparing((JsonObject v) -> published(v)).reversed());

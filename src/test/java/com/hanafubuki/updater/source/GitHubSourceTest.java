@@ -207,6 +207,15 @@ class GitHubSourceTest {
     }
 
     @Test
+    void rejectedTokenIsExplained() {
+        server.route(API + "/releases/latest", r -> FakeHttpServer.Reply.json(401, "{\"message\":\"Bad credentials\"}"));
+
+        IOException e = assertThrows(IOException.class,
+                () -> source("github_pat_wrong", GitHubSource.SignatureMode.OFF).findLatest(request(Map.of())));
+        assertTrue(e.getMessage().contains("rejected github.token") && e.getMessage().contains("expired"), e.getMessage());
+    }
+
+    @Test
     void otherForbiddenAnswerIsReportedWithStatus() {
         server.route(API + "/releases/latest", r -> FakeHttpServer.Reply.json(403, "{\"message\":\"Forbidden\"}")
                 .withHeader("X-RateLimit-Remaining", "42"));

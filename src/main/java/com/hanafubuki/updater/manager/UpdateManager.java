@@ -293,6 +293,8 @@ public final class UpdateManager {
             return ctx.result(PluginResult.Status.CANCELLED, null, "cancelled");
         } catch (BlockedException e) {
             return ctx.result(PluginResult.Status.BLOCKED, e.candidate, e.getMessage());
+        } catch (com.hanafubuki.updater.source.NoVersionException e) {
+            return ctx.result(PluginResult.Status.NO_VERSION, null, e.getMessage());
         } catch (IOException | RuntimeException e) {
             if (run.cancelled.get() || Thread.currentThread().isInterrupted()) {
                 return ctx.result(PluginResult.Status.CANCELLED, null, "cancelled");
