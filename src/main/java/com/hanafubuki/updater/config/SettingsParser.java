@@ -15,6 +15,7 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.TreeMap;
 import java.util.TreeSet;
 
 import com.hanafubuki.updater.http.RetryPolicy;
@@ -59,13 +60,22 @@ public final class SettingsParser {
         return new Result(settings, List.copyOf(p.problems));
     }
 
+    /** Keys that were removed, with what to do instead. */
+    private static final Map<String, String> REMOVED = Map.of(
+            "global.auto_update_config", "versions are no longer written to config.yml; state.json keeps them",
+            "global.auto_discover", "use global.auto_detect; found plugins wait in plugins.json for /updateplugins confirm",
+            "global.auto_discover_on_startup", "use global.auto_detect; found plugins wait in plugins.json for /updateplugins confirm");
+
     private UpdaterSettings build() {
+        new TreeMap<>(REMOVED).forEach((key, hint) -> {
+            if (get(key) != null) {
+                problems.add(key + ": removed in 1.6.0, delete this line (" + hint + ")");
+            }
+        });
         UpdaterSettings.General general = new UpdaterSettings.General(
                 string("global.min_version", null),
                 string("global.max_version", null),
-                bool("global.auto_update_config", true),
-                bool("global.auto_discover", false),
-                bool("global.auto_discover_on_startup", false),
+                bool("global.auto_detect", true),
                 integer("global.parallelism", 4, 1, 16),
                 integer("global.max_download_mb", 256, 1, 2048) * 1024L * 1024L);
 

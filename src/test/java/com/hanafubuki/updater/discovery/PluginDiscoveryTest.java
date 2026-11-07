@@ -101,7 +101,7 @@ class PluginDiscoveryTest {
     void spigotResources(String website, int resourceId) {
         Suggestion s = web(website);
         assertEquals("spigotmc", s.source());
-        assertEquals(Map.of("resource_id", resourceId), s.options());
+        assertEquals(Map.of("resource_id", String.valueOf(resourceId)), s.options());
         assertEquals("website is a SpigotMC resource page", s.reason());
     }
 

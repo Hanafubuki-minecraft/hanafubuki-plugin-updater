@@ -35,14 +35,13 @@ public record UpdaterSettings(
     /**
      * @param minVersion        installed versions below this are not updated (null = no limit)
      * @param maxVersion        versions above this are never installed (null = no limit)
-     * @param autoUpdateConfig  write the staged version into config.yml after an update
-     * @param autoDiscover      allow /updateplugins discover
-     * @param discoverOnStartup run discovery once at startup and add found plugins
+     * @param autoDetect        look for plugins missing from config.yml at startup and before every
+     *                          scheduled check; found plugins wait in plugins.json for confirmation
      * @param parallelism       plugins checked at the same time
      * @param maxDownloadBytes  largest accepted plugin jar
      */
-    public record General(String minVersion, String maxVersion, boolean autoUpdateConfig, boolean autoDiscover,
-                          boolean discoverOnStartup, int parallelism, long maxDownloadBytes) {
+    public record General(String minVersion, String maxVersion, boolean autoDetect, int parallelism,
+                          long maxDownloadBytes) {
     }
 
     /**
@@ -143,6 +142,27 @@ public record UpdaterSettings(
             case "custom" -> custom.downloadTimeout();
             default -> Duration.ofSeconds(60);
         };
+    }
+
+    /**
+     * These settings with confirmed plugins from plugins.json added. config.yml entries come
+     * first and win over a detected entry with the same name (case-insensitive).
+     */
+    public UpdaterSettings withDetected(Map<String, PluginEntry> detected) {
+        if (detected == null || detected.isEmpty()) {
+            return this;
+        }
+        java.util.TreeSet<String> configured = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        configured.addAll(plugins.keySet());
+        Map<String, PluginEntry> merged = new java.util.LinkedHashMap<>(plugins);
+        detected.forEach((name, entry) -> {
+            if (configured.add(name)) {
+                merged.put(name, entry);
+            }
+        });
+        return new UpdaterSettings(general, modes, schedule, modrinth, github, githubAdvisories, hangar, spigotmc,
+                custom, backups, dependencies, notifications, style, consoleJson, health,
+                java.util.Collections.unmodifiableMap(merged));
     }
 
     /** Plugin names in config order. */

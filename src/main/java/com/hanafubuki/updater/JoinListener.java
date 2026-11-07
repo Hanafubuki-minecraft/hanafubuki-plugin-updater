@@ -1,5 +1,6 @@
 package com.hanafubuki.updater;
 
+import java.util.List;
 import java.util.Map;
 
 import org.bukkit.entity.Player;
@@ -13,8 +14,8 @@ import com.hanafubuki.updater.manager.PluginResult;
 import com.hanafubuki.updater.source.GitHubAdvisories;
 
 /**
- * Reminds players with {@code hanafubuki.updater.notify} about updates that wait for a restart
- * and about open security advisories from the last run.
+ * Reminds players with {@code hanafubuki.updater.notify} about found plugins that wait for
+ * confirmation, updates that wait for a restart and open security advisories from the last run.
  */
 final class JoinListener implements Listener {
 
@@ -31,6 +32,12 @@ final class JoinListener implements Listener {
             return;
         }
         Messages m = plugin.messages();
+        List<String> pending = plugin.registry().pendingNames();
+        if (!pending.isEmpty()) {
+            m.send(player, "<warning><count> new plugin(s) found, waiting for confirmation: <accent><list></accent> "
+                            + "<click:run_command:'/updateplugins pending'><primary>[review]</primary></click>",
+                    Messages.text("count", pending.size()), Messages.text("list", String.join(", ", pending)));
+        }
         Map<String, String> staged = plugin.state().allStaged();
         if (!staged.isEmpty()) {
             m.send(player, "<warning><count> plugin update(s) wait for a restart: <accent><list>",

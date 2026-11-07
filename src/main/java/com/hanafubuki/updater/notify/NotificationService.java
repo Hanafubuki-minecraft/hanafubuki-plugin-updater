@@ -11,7 +11,6 @@ import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
 import java.util.logging.Logger;
 
@@ -55,11 +54,7 @@ public final class NotificationService implements UpdateListener {
         this.settings = settings;
         this.http = http;
         this.logger = logger;
-        this.executor = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "HanafubukiUpdater-notify");
-            t.setDaemon(true);
-            return t;
-        });
+        this.executor = com.hanafubuki.updater.util.Threads.lazySingle("HanafubukiUpdater-notify", 30);
     }
 
     public boolean anyEnabled() {

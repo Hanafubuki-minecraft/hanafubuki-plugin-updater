@@ -23,8 +23,10 @@ public final class Permissions {
     public static final String METRICS = "hanafubuki.updater.metrics";
     /** List backups, roll back, remove staged updates, hold/release plugins. */
     public static final String ROLLBACK = "hanafubuki.updater.rollback";
-    /** Find installed plugins missing from config.yml and add them. */
+    /** Look for installed plugins missing from config.yml right now. */
     public static final String DISCOVER = "hanafubuki.updater.discover";
+    /** Review, confirm and reject automatically found plugins. */
+    public static final String CONFIRM = "hanafubuki.updater.confirm";
     /** Reload config.yml. */
     public static final String RELOAD = "hanafubuki.updater.reload";
     /** Send a test Discord/webhook notification. */

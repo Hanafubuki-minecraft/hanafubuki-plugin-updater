@@ -3,6 +3,7 @@ package com.hanafubuki.updater.config;
 import static org.junit.jupiter.api.Assertions.assertEquals;
 import static org.junit.jupiter.api.Assertions.assertFalse;
 import static org.junit.jupiter.api.Assertions.assertNull;
+import static org.junit.jupiter.api.Assertions.assertSame;
 import static org.junit.jupiter.api.Assertions.assertTrue;
 
 import java.time.DayOfWeek;
@@ -54,9 +55,7 @@ class SettingsParserTest {
             UpdaterSettings.General g = s.general();
             assertNull(g.minVersion());
             assertNull(g.maxVersion());
-            assertTrue(g.autoUpdateConfig());
-            assertFalse(g.autoDiscover());
-            assertFalse(g.discoverOnStartup());
+            assertTrue(g.autoDetect());
             assertEquals(4, g.parallelism());
             assertEquals(256L * 1024 * 1024, g.maxDownloadBytes());
 
@@ -126,9 +125,7 @@ class SettingsParserTest {
                 global:
                   min_version: "1.0"
                   max_version: "9.9"
-                  auto_update_config: false
-                  auto_discover: yes
-                  auto_discover_on_startup: "on"
+                  auto_detect: false
                   parallelism: 8
                   max_download_mb: 64
                 modes:
@@ -166,7 +163,7 @@ class SettingsParserTest {
                 """);
         assertEquals(List.of(), r.problems());
         UpdaterSettings s = r.settings();
-        assertEquals(new UpdaterSettings.General("1.0", "9.9", false, true, true, 8, 64L * 1024 * 1024), s.general());
+        assertEquals(new UpdaterSettings.General("1.0", "9.9", false, 8, 64L * 1024 * 1024), s.general());
         assertTrue(s.modes().includeOnly());
         assertEquals(List.of("LuckPerms", "Essentials"), List.copyOf(s.modes().includeList()));
         assertEquals(Set.of("WorldEdit"), s.modes().excludeList());
@@ -201,7 +198,7 @@ class SettingsParserTest {
     void invalidValuesAreReportedWithPathAndDefaultsAreUsed() {
         SettingsParser.Result r = parse("""
                 global:
-                  auto_update_config: maybe
+                  auto_detect: maybe
                   parallelism: lots
                   max_download_mb: 999999
                   min_version: [1, 2]
@@ -227,8 +224,8 @@ class SettingsParserTest {
                 """);
         UpdaterSettings s = r.settings();
 
-        assertProblem(r, "global.auto_update_config: 'maybe' is not true or false");
-        assertTrue(s.general().autoUpdateConfig());
+        assertProblem(r, "global.auto_detect: 'maybe' is not true or false");
+        assertTrue(s.general().autoDetect());
 
         assertProblem(r, "global.parallelism: 'lots' is not a number");
         assertEquals(4, s.general().parallelism());
@@ -624,5 +621,46 @@ class SettingsParserTest {
     void blankListEntriesAreIgnored() {
         UpdaterSettings.Modes modes = parse("modes:\n  exclude_list: [\"\", \" A \", null]\n").settings().modes();
         assertEquals(Set.of("A"), modes.excludeList());
+    }
+
+    @Test
+    void removedKeysAreReportedButNotFatal() {
+        SettingsParser.Result r = parse("""
+                global:
+                  auto_update_config: true
+                  auto_discover: false
+                  auto_discover_on_startup: true
+                  parallelism: 2
+                """);
+        assertEquals(3, r.problems().size(), r.problems().toString());
+        assertProblem(r, "global.auto_update_config: removed in 1.6.0");
+        assertProblem(r, "global.auto_discover: removed in 1.6.0");
+        assertProblem(r, "global.auto_discover_on_startup: removed in 1.6.0");
+        assertEquals(2, r.settings().general().parallelism());
+        assertTrue(r.settings().general().autoDetect());
+    }
+
+    @Test
+    void detectedPluginsAreAddedAfterConfigAndConfigWins() {
+        UpdaterSettings s = parse("""
+                plugins:
+                  GSit:
+                    source: modrinth
+                    project_id: gsit
+                """).settings();
+        Map<String, PluginEntry> detected = new java.util.LinkedHashMap<>();
+        detected.put("gsit", new PluginEntry("gsit", "github", Map.of("repo", "x/y")));
+        detected.put("LuckPerms", new PluginEntry("LuckPerms", "modrinth", Map.of("project_id", "Vebnzrzj")));
+
+        UpdaterSettings merged = s.withDetected(detected);
+        assertEquals(List.of("GSit", "LuckPerms"), merged.pluginNames());
+        assertEquals("modrinth", merged.plugins().get("GSit").source());
+        assertEquals("gsit", merged.plugins().get("GSit").string("project_id"));
+        assertEquals("Vebnzrzj", merged.plugins().get("LuckPerms").string("project_id"));
+        // The original settings are not changed.
+        assertEquals(List.of("GSit"), s.pluginNames());
+        assertSame(s, s.withDetected(Map.of()));
+        assertEquals(s.general(), merged.general());
+        assertEquals(s.schedule(), merged.schedule());
     }
 }

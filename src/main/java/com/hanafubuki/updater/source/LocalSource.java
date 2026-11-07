@@ -116,7 +116,7 @@ public final class LocalSource implements UpdateSource {
         List<String> notes = checksum == null ? List.of("No checksum file next to " + newest.file().getFileName()) : List.of();
 
         UpdateCandidate.Freshness freshness = UpdateCandidate.Freshness.UNKNOWN;
-        String installedHash = Checksum.hash(request.installed().jar(), Checksum.Algorithm.SHA256);
+        String installedHash = Checksum.hashCached(request.installed().jar(), Checksum.Algorithm.SHA256);
         if (installedHash.equals(Checksum.hash(newest.file(), Checksum.Algorithm.SHA256))) {
             freshness = UpdateCandidate.Freshness.SAME;
         }

@@ -140,6 +140,41 @@ public record Checksum(Algorithm algorithm, String hex) {
         return HexFormat.of().formatHex(digest.digest());
     }
 
+    /** File identity for {@link #hashCached}: a changed size or modification time means a new file. */
+    private record FileKey(Path path, Algorithm algorithm, long size, long modified) {
+    }
+
+    private static final int HASH_CACHE_SIZE = 256;
+    private static final java.util.Map<FileKey, String> HASH_CACHE = new java.util.LinkedHashMap<>(16, 0.75f, true) {
+        @Override
+        protected boolean removeEldestEntry(java.util.Map.Entry<FileKey, String> eldest) {
+            return size() > HASH_CACHE_SIZE;
+        }
+    };
+
+    /**
+     * Like {@link #hash}, but remembers the result while the file's size and modification time
+     * stay the same. Meant for installed plugin jars, which only change on a restart; hashing a
+     * large jar on every check would waste CPU. Never use it to verify downloads.
+     */
+    public static String hashCached(Path file, Algorithm algorithm) throws IOException {
+        java.nio.file.attribute.BasicFileAttributes attrs =
+                Files.readAttributes(file, java.nio.file.attribute.BasicFileAttributes.class);
+        FileKey key = new FileKey(file.toAbsolutePath().normalize(), algorithm, attrs.size(),
+                attrs.lastModifiedTime().toMillis());
+        synchronized (HASH_CACHE) {
+            String cached = HASH_CACHE.get(key);
+            if (cached != null) {
+                return cached;
+            }
+        }
+        String hex = hash(file, algorithm);
+        synchronized (HASH_CACHE) {
+            HASH_CACHE.put(key, hex);
+        }
+        return hex;
+    }
+
     /** True if the file's hash equals this checksum. */
     public boolean matches(Path file) throws IOException {
         return hex.equals(hash(file, algorithm));

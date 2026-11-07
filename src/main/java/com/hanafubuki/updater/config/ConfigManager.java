@@ -13,15 +13,14 @@ import org.bukkit.configuration.InvalidConfigurationException;
 import org.bukkit.configuration.file.YamlConfiguration;
 import org.bukkit.plugin.java.JavaPlugin;
 
-import com.hanafubuki.updater.discovery.PluginDiscovery;
-
 /**
- * Loads config.yml and writes the few things the plugin changes itself (plugin versions after
- * an update, discovered plugins).
+ * Loads config.yml. The file belongs to the user: the plugin only creates it from the default on
+ * first start and never writes to it afterwards (found plugins go to plugins.json, versions to
+ * state.json).
  *
- * <p>All methods are synchronized: updates are written from worker threads while a reload may
- * run on the main thread. The YAML path separator is set to an unused character so plugin names
- * containing dots are handled as single keys. Comments in the file are kept on save.
+ * <p>Methods are synchronized because the settings are read from worker threads while a reload
+ * runs on the main thread. The YAML path separator is set to an unused character so plugin names
+ * containing dots are handled as single keys.
  */
 public final class ConfigManager {
 
@@ -30,7 +29,6 @@ public final class ConfigManager {
     private final JavaPlugin plugin;
     private final File file;
     private final Logger logger;
-    private YamlConfiguration yaml;
     private UpdaterSettings settings;
     private List<String> problems = List.of();
 
@@ -64,7 +62,6 @@ public final class ConfigManager {
             return false;
         }
         SettingsParser.Result result = SettingsParser.parse(toMap(fresh));
-        this.yaml = fresh;
         this.settings = result.settings();
         this.problems = result.problems();
         for (String p : problems) {
@@ -79,67 +76,6 @@ public final class ConfigManager {
 
     public synchronized List<String> problems() {
         return problems;
-    }
-
-    /** Writes {@code version} of a plugin entry after an update. */
-    public synchronized void setPluginVersion(String pluginName, String version) {
-        ConfigurationSection entry = findPluginSection(pluginName);
-        if (entry == null) {
-            return;
-        }
-        entry.set("version", version);
-        save();
-    }
-
-    /**
-     * Adds a discovered plugin to the plugins section.
-     *
-     * @return false if an entry with this name exists already or the suggestion has no source
-     */
-    public synchronized boolean addPlugin(PluginDiscovery.Suggestion suggestion) {
-        if (!suggestion.isUsable() || yaml == null || findPluginSection(suggestion.name()) != null) {
-            return false;
-        }
-        ConfigurationSection plugins = yaml.getConfigurationSection("plugins");
-        if (plugins == null) {
-            plugins = yaml.createSection("plugins");
-        }
-        ConfigurationSection entry = plugins.createSection(suggestion.name());
-        entry.set("source", suggestion.source());
-        suggestion.options().forEach(entry::set);
-        entry.set("version", suggestion.version());
-        entry.setInlineComments("source", List.of("added by auto-discovery: " + suggestion.reason()));
-        return save();
-    }
-
-    private ConfigurationSection findPluginSection(String pluginName) {
-        if (yaml == null) {
-            return null;
-        }
-        ConfigurationSection plugins = yaml.getConfigurationSection("plugins");
-        if (plugins == null) {
-            return null;
-        }
-        for (String key : plugins.getKeys(false)) {
-            if (key.equalsIgnoreCase(pluginName) && plugins.isConfigurationSection(key)) {
-                return plugins.getConfigurationSection(key);
-            }
-        }
-        return null;
-    }
-
-    private boolean save() {
-        try {
-            yaml.save(file);
-            // Keep the parsed settings in sync with what was written.
-            SettingsParser.Result result = SettingsParser.parse(toMap(yaml));
-            settings = result.settings();
-            problems = result.problems();
-            return true;
-        } catch (IOException e) {
-            logger.severe("Could not save config.yml: " + e.getMessage());
-            return false;
-        }
     }
 
     /** Converts a Bukkit section tree into plain nested maps and lists. */

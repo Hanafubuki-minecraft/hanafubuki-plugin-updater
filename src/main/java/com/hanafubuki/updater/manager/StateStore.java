@@ -2,7 +2,6 @@ package com.hanafubuki.updater.manager;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.AtomicMoveNotSupportedException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardCopyOption;
@@ -18,6 +17,7 @@ import java.util.logging.Logger;
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
 import com.google.gson.JsonParseException;
+import com.hanafubuki.updater.util.AtomicFiles;
 
 /**
  * Persistent updater state in {@code state.json}: last run, and per plugin the last check,
@@ -124,14 +124,7 @@ public final class StateStore {
 
     private void save() {
         try {
-            Files.createDirectories(file.getParent());
-            Path tmp = file.resolveSibling(file.getFileName() + ".tmp");
-            Files.writeString(tmp, gson.toJson(data), StandardCharsets.UTF_8);
-            try {
-                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING, StandardCopyOption.ATOMIC_MOVE);
-            } catch (AtomicMoveNotSupportedException e) {
-                Files.move(tmp, file, StandardCopyOption.REPLACE_EXISTING);
-            }
+            AtomicFiles.writeString(file, gson.toJson(data));
         } catch (IOException e) {
             if (logger != null) {
                 logger.warning("Could not save " + file.getFileName() + ": " + e.getMessage());
