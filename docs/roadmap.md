@@ -52,6 +52,17 @@ Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
 
 ## Changelog
 
+### 1.5.1
+
+**Fixed**
+
+- Plugins that Paper remaps (Spigot-mapped plugins such as GSit) were checked through the remapped copy in
+  `plugins/.paper-remapped/`, so Modrinth could not identify them; the original jar is used now.
+- GitHub: a repository without releases, a private repository without a token and a rejected token
+  (HTTP 401) each get a clear message instead of retries that used up the API rate limit.
+- Modrinth projects that publish only beta versions (Geyser) report which `version_types` to set.
+- Jars downloaded from other sites get a hint to set `project_id`.
+
 ### 1.5.0
 
 The plugin was rewritten. Configs from 1.2.x keep working: the same sections and plugin entries are read,
