@@ -101,7 +101,7 @@ class PluginDiscoveryTest {
     void spigotResources(String website, int resourceId) {
         Suggestion s = web(website);
         assertEquals("spigotmc", s.source());
-        assertEquals(Map.of("resource_id", resourceId), s.options());
+        assertEquals(Map.of("resource_id", String.valueOf(resourceId)), s.options());
         assertEquals("website is a SpigotMC resource page", s.reason());
     }
 
@@ -237,6 +237,31 @@ class PluginDiscoveryTest {
         Suggestion s = discovery.suggest(new Candidate("X", "1", JAR, "https://modrinth.com/plugin/x"));
         assertEquals("modrinth", s.source());
         assertEquals(Map.of("project_id", "x"), s.options());
+        assertTrue(s.lookupFailed(), "an exact hash match may still exist; look again later");
+        assertTrue(s.reason().contains("Modrinth lookup failed: HTTP 503"), s.reason());
+    }
+
+    @Test
+    void afterTheFirstModrinthErrorTheRestIsNotSentToModrinth() throws InterruptedIOException {
+        List<String> calls = new java.util.ArrayList<>();
+        PluginDiscovery discovery = new PluginDiscovery(jar -> {
+            calls.add(jar.toString());
+            throw new IOException("timeout");
+        });
+        List<Suggestion> out = discovery.discover(List.of(new Candidate("A", "1", Path.of("a.jar"), null),
+                new Candidate("B", "1", Path.of("b.jar"), "https://github.com/o/b"),
+                new Candidate("C", "1", Path.of("c.jar"), null)));
+        assertEquals(List.of("a.jar"), calls);
+        assertTrue(out.stream().allMatch(Suggestion::lookupFailed));
+        assertEquals("github", out.get(1).source());
+        assertFalse(out.get(2).isUsable());
+    }
+
+    @Test
+    void successfulLookupIsNotMarkedFailed() throws InterruptedIOException {
+        Suggestion s = new PluginDiscovery(jar -> Optional.empty())
+                .suggest(new Candidate("X", "1", JAR, "https://github.com/o/x"));
+        assertFalse(s.lookupFailed());
     }
 
     @Test
@@ -248,6 +273,7 @@ class PluginDiscoveryTest {
         assertFalse(s.isUsable());
         assertEquals("Modrinth lookup failed: Modrinth answered HTTP 503", s.reason());
         assertEquals(Map.of(), s.options());
+        assertTrue(s.lookupFailed());
     }
 
     @Test

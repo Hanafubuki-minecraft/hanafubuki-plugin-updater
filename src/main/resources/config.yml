@@ -17,12 +17,11 @@ global:
   min_version: ""
   # Versions above max_version are never installed. Empty = no limit.
   max_version: ""
-  # Write the new version into the plugin's entry below after an update.
-  auto_update_config: true
-  # Allow "/updateplugins discover add" to add installed plugins that are missing below.
-  auto_discover: false
-  # Run discovery once at startup and add every plugin it can identify.
-  auto_discover_on_startup: false
+  # Look for installed plugins that are not in "plugins:" below, at startup and before every
+  # scheduled check. Found plugins are written to plugins.json and are NOT updated until an op
+  # confirms them: /updateplugins pending, /updateplugins confirm <plugin>, or the menu.
+  # Entries below always win over plugins.json. This file is never changed by the plugin.
+  auto_detect: true
   # How many plugins are checked at the same time (1-16).
   parallelism: 4
   # Largest accepted plugin jar in MB.
@@ -192,5 +191,6 @@ health_check:
 #     repo: EssentialsX/Essentials
 #     asset_pattern: "EssentialsX-2*.jar"
 #
-# Run "/updateplugins discover" to get suggestions for your installed plugins.
+# Plugins you do not list here are found automatically (global.auto_detect) and wait for
+# your confirmation in plugins.json. List a plugin here to set its source yourself.
 plugins: {}

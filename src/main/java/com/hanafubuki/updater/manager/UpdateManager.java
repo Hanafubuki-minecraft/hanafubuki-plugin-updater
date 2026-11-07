@@ -259,7 +259,7 @@ public final class UpdateManager {
                 PluginEntry e = byName.get(name);
                 if (e == null) {
                     preResults.add(new PluginResult(name, null, PluginResult.Status.SKIPPED, null, null,
-                            "not configured in config.yml", List.of(), List.of(), null, 0));
+                            "not tracked: not in config.yml and not confirmed in plugins.json", List.of(), List.of(), null, 0));
                 } else if (settings.modes().isExcluded(e.name())) {
                     preResults.add(new PluginResult(e.name(), e.source(), PluginResult.Status.SKIPPED, null, null,
                             "in modes.exclude_list", List.of(), List.of(), null, 0));

@@ -164,4 +164,27 @@ class ChecksumTest {
         assertEquals("sha256:" + SHA256_HELLO, c.toString());
         assertEquals(c, Checksum.parse(c.toString()).orElseThrow());
     }
+
+    @Test
+    void hashCachedFollowsFileChanges(@org.junit.jupiter.api.io.TempDir java.nio.file.Path dir) throws Exception {
+        java.nio.file.Path f = dir.resolve("a.jar");
+        java.nio.file.Files.writeString(f, "one");
+        java.nio.file.attribute.FileTime t = java.nio.file.attribute.FileTime.fromMillis(1_700_000_000_000L);
+        java.nio.file.Files.setLastModifiedTime(f, t);
+        String first = Checksum.hashCached(f, Checksum.Algorithm.SHA512);
+        assertEquals(Checksum.hash(f, Checksum.Algorithm.SHA512), first);
+        assertEquals(first, Checksum.hashCached(f, Checksum.Algorithm.SHA512));
+        assertEquals(Checksum.hash(f, Checksum.Algorithm.SHA256), Checksum.hashCached(f, Checksum.Algorithm.SHA256),
+                "algorithm is part of the key");
+
+        // Same size, new modification time: hashed again.
+        java.nio.file.Files.writeString(f, "two");
+        java.nio.file.Files.setLastModifiedTime(f, java.nio.file.attribute.FileTime.fromMillis(1_700_000_001_000L));
+        assertEquals(Checksum.hash(f, Checksum.Algorithm.SHA512), Checksum.hashCached(f, Checksum.Algorithm.SHA512));
+
+        // New size, same modification time: hashed again.
+        java.nio.file.Files.writeString(f, "three");
+        java.nio.file.Files.setLastModifiedTime(f, t);
+        assertEquals(Checksum.hash(f, Checksum.Algorithm.SHA512), Checksum.hashCached(f, Checksum.Algorithm.SHA512));
+    }
 }

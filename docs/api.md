@@ -35,8 +35,9 @@ Docs: <https://docs.modrinth.com>. No token is used.
 2. **Project.** `project_id` from the entry (id or slug, 2–64 characters of `A-Z a-z 0-9 _ . -`) or, if not
    set, the project of the identified file. If neither exists the check fails with
    "The installed jar is not a file published on Modrinth. Set project_id …".
-3. **Versions.** `GET /v2/project/{id}/version?loaders=["paper"]&game_versions=["1.21.9"]` with the
-   entry's or global `loaders` and `game_versions` (empty `game_versions` = the server's version).
+3. **Versions.** `GET /v2/project/{id}/version?loaders=["paper"]&game_versions=["1.21.9"]&include_changelog=false`
+   with the entry's or global `loaders` and `game_versions` (empty `game_versions` = the server's version).
+   `include_changelog=false` leaves the changelogs out, which makes the answer much smaller.
 4. **Filter.** Keep versions whose `version_type` is in `version_types` (default `release`) and that have a
    usable jar: the file marked `primary`, or the only `.jar` file. Versions with several non-primary jars are
    skipped.
@@ -157,9 +158,12 @@ All traffic goes through `http/HttpService`.
   CDNs or other hosts. A redirect from `https` to anything else is refused. Notification POSTs do not follow
   redirects.
 - **Conditional requests.** GET responses with `ETag` or `Last-Modified` are kept in an in-memory LRU cache
-  of 512 entries (`HttpCache.inMemory(512)`). The next request sends `If-None-Match` / `If-Modified-Since`;
-  a `304` is answered from the cache. GitHub does not count `304` answers against the rate limit. The cache is
-  lost on restart.
+  of at most 512 entries and 4 million characters of response text (`HttpCache.inMemory(512)`; 4–8 MB of
+  memory, two bytes per character for non-Latin-1 text); a body longer than a quarter of that budget is not
+  cached. The next request sends `If-None-Match` / `If-Modified-Since`; a `304` is answered from the cache.
+  This saves traffic everywhere; GitHub leaves `304` answers out of the rate limit only for requests with a
+  token (`github.token`), without one they still count. The cache is lost on restart. The HTTP client is shut
+  down when the plugin is disabled.
 - **Size limits.** API bodies are read up to 32 MB; downloads up to `global.max_download_mb` (checked against
   `Content-Length` and while streaming); notification answers up to 64 KB.
 - **Interruptible.** An interrupted thread (cancelled run) aborts the request, a retry wait or a download with
@@ -172,7 +176,7 @@ All traffic goes through `http/HttpService`.
 | Service | Limit | What the plugin does |
 |---|---|---|
 | Modrinth | 300 requests per minute per IP | 2 requests per plugin (hash lookup, version list) plus the download |
-| GitHub | 60 per hour without token, 5000 with | 1 request per plugin (+1 for advisories, +2–3 with signatures, +1 per sidecar/checksum list). `304` answers are free. Set `github.token` for more than a handful of plugins. |
+| GitHub | 60 per hour without token, 5000 with | 1 request per plugin (+1 for advisories, +2–3 with signatures, +1 per sidecar/checksum list). `304` answers are free only with a token. Set `github.token` for more than a handful of plugins or short check intervals. |
 | Hangar, Spiget | not documented as strict | 1–3 requests per plugin; a name search on Spiget can take up to 20 pages |
 
 `429` and `5xx` answers are retried as described above.

@@ -9,8 +9,8 @@ import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ExecutorService;
-import java.util.concurrent.Executors;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
 
 import org.bukkit.Bukkit;
 import org.bukkit.command.CommandSender;
@@ -24,6 +24,7 @@ import com.hanafubuki.updater.config.UpdaterSettings;
 import com.hanafubuki.updater.console.Messages;
 import com.hanafubuki.updater.console.ResultReporter;
 import com.hanafubuki.updater.discovery.PluginDiscovery;
+import com.hanafubuki.updater.discovery.PluginRegistry;
 import com.hanafubuki.updater.gui.MenuListener;
 import com.hanafubuki.updater.health.HealthServer;
 import com.hanafubuki.updater.http.HttpCache;
@@ -67,8 +68,20 @@ public final class PluginUpdater extends JavaPlugin {
     private HealthServer health;
     private UpdateScheduler scheduler;
     private ExecutorService background;
+    /** Plugin detection has its own thread so slow lookups never delay backups, rollback or unstage. */
+    private ExecutorService detector;
+    private UpdateCommand command;
     private ResultReporter reporter;
+    private PluginRegistry registry;
     private volatile UpdateReport lastReport;
+    private final AtomicBoolean detecting = new AtomicBoolean();
+    /** A detection was asked for while one was running; run once more afterwards (config may have changed). */
+    private final AtomicBoolean detectAgain = new AtomicBoolean();
+    /** config.yml settings merged with confirmed plugins.json entries, rebuilt when either changes. */
+    private final Object effectiveLock = new Object();
+    private UpdaterSettings effective;
+    private UpdaterSettings effectiveBase;
+    private long effectiveRevision = -1;
 
     @Override
     public void onEnable() {
@@ -76,15 +89,15 @@ public final class PluginUpdater extends JavaPlugin {
         config.load();
         messages = new Messages(config.settings().style());
 
-        background = Executors.newSingleThreadExecutor(r -> {
-            Thread t = new Thread(r, "HanafubukiUpdater-background");
-            t.setDaemon(true);
-            return t;
-        });
+        background = com.hanafubuki.updater.util.Threads.lazySingle("HanafubukiUpdater-background", 30);
+        detector = com.hanafubuki.updater.util.Threads.lazySingle("HanafubukiUpdater-detect", 30);
+        detecting.set(false);
+        detectAgain.set(false);
         http = new HttpService(HttpService.newClient(Duration.ofSeconds(10)),
                 "ByteMe6/hanafubuki-plugin-updater/" + getPluginMeta().getVersion(),
                 RetryPolicy.DEFAULT, Thread::sleep, HttpCache.inMemory(512), getLogger());
         state = new StateStore(getDataFolder().toPath().resolve("state.json"), getLogger());
+        registry = new PluginRegistry(getDataFolder().toPath().resolve("plugins.json"), getLogger());
         backups = new BackupManager(getDataFolder().toPath().resolve("backups"));
         reporter = new ResultReporter(this, config, () -> messages);
         scheduler = new UpdateScheduler(this);
@@ -97,22 +110,22 @@ public final class PluginUpdater extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
-        UpdateCommand executor = new UpdateCommand(this);
-        command.setExecutor(executor);
-        command.setTabCompleter(executor);
-        getServer().getPluginManager().registerEvents(new MenuListener(), this);
+        this.command = new UpdateCommand(this);
+        command.setExecutor(this.command);
+        command.setTabCompleter(this.command);
+        getServer().getPluginManager().registerEvents(new MenuListener(this), this);
         getServer().getPluginManager().registerEvents(new JoinListener(this), this);
 
         startHealthServer();
         // After a restart Paper has applied the staged jars; forget them so nobody is told to restart again.
         Bukkit.getScheduler().runTask(this, this::reconcileStaged);
         scheduler.start(config.settings().schedule());
-        if (config.settings().general().discoverOnStartup()) {
+        if (config.settings().general().autoDetect()) {
             // Wait one tick so every plugin has finished enabling.
-            Bukkit.getScheduler().runTask(this, () -> discover(Bukkit.getConsoleSender(), true, null));
+            Bukkit.getScheduler().runTask(this, () -> detect(null, false));
         }
-        getLogger().info("Tracking " + config.settings().plugins().size() + " plugins; schedule: "
-                + config.settings().schedule().describe());
+        getLogger().info("Tracking " + settings().plugins().size() + " plugins (" + config.settings().plugins().size()
+                + " from config.yml); schedule: " + config.settings().schedule().describe());
     }
 
     @Override
@@ -127,6 +140,12 @@ public final class PluginUpdater extends JavaPlugin {
         if (notifications != null) {
             notifications.shutdown();
         }
+        if (detector != null) {
+            detector.shutdownNow();
+        }
+        if (http != null) {
+            http.shutdown();
+        }
         if (background != null) {
             background.shutdownNow();
             try {
@@ -137,19 +156,24 @@ public final class PluginUpdater extends JavaPlugin {
         }
     }
 
-    /** Clears staged-update records whose file is no longer in the update folder. Main thread. */
+    /**
+     * Clears staged-update records whose file is no longer in the update folder. Takes the plugin
+     * snapshot on the main thread; the file checks and the state write run in the background.
+     */
     private void reconcileStaged() {
         Map<String, com.hanafubuki.updater.source.InstalledPlugin> installed =
                 new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
         installed.putAll(ServerPlugins.snapshot());
         Path updateFolder = ServerPlugins.updateFolder();
-        List<String> applied = state.reconcileStaged(name -> {
-            com.hanafubuki.updater.source.InstalledPlugin p = installed.get(name);
-            return p != null && java.nio.file.Files.exists(Installer.stagedPath(p, updateFolder));
+        runBackground(() -> {
+            List<String> applied = state.reconcileStaged(name -> {
+                com.hanafubuki.updater.source.InstalledPlugin p = installed.get(name);
+                return p != null && java.nio.file.Files.exists(Installer.stagedPath(p, updateFolder));
+            });
+            if (!applied.isEmpty()) {
+                getLogger().info("Applied by the restart: " + String.join(", ", applied));
+            }
         });
-        if (!applied.isEmpty()) {
-            getLogger().info("Applied by the restart: " + String.join(", ", applied));
-        }
     }
 
     /** (Re)creates sources and the update manager from the current settings. */
@@ -213,7 +237,7 @@ public final class PluginUpdater extends JavaPlugin {
         }
         try {
             health = HealthServer.start(h.bindAddress(), h.port(), this::healthStatus,
-                    () -> manager.metrics().prometheus(config.settings().plugins().size()));
+                    () -> manager.metrics().prometheus(settings().plugins().size()));
             getLogger().info("Health endpoint listening on http://" + h.bindAddress() + ":" + h.port() + "/health");
         } catch (IOException | RuntimeException e) {
             getLogger().severe("Could not start the health endpoint on " + h.bindAddress() + ":" + h.port() + ": " + e.getMessage());
@@ -232,7 +256,8 @@ public final class PluginUpdater extends JavaPlugin {
         status.put("status", "UP");
         status.put("version", getPluginMeta().getVersion());
         status.put("running", manager.isRunning());
-        status.put("plugins_tracked", config.settings().plugins().size());
+        status.put("plugins_tracked", settings().plugins().size());
+        status.put("plugins_pending", registry.pendingNames().size());
         status.put("staged_updates", state.allStaged().size());
         state.lastRun().ifPresent(r -> {
             Map<String, Object> last = new LinkedHashMap<>();
@@ -256,7 +281,7 @@ public final class PluginUpdater extends JavaPlugin {
      * @return false if a run is already active
      */
     public boolean startRun(RunOptions options, CommandSender requester) {
-        Optional<UpdateManager.RunHandle> handle = manager.start(config.settings(), ServerPlugins.snapshot(),
+        Optional<UpdateManager.RunHandle> handle = manager.start(settings(), ServerPlugins.snapshot(),
                 ServerPlugins.updateFolder(), ServerPlugins.minecraftVersion(), options);
         if (handle.isEmpty()) {
             return false;
@@ -297,6 +322,10 @@ public final class PluginUpdater extends JavaPlugin {
         stopHealthServer();
         startHealthServer();
         scheduler.start(config.settings().schedule());
+        if (ok && config.settings().general().autoDetect()) {
+            // Plugins removed from config.yml become candidates again; new entries settle pending ones.
+            detect(null, false);
+        }
         List<String> problems = config.problems();
         if (!ok) {
             return Optional.of(List.of("config.yml is not valid YAML; the previous settings stay active"));
@@ -305,60 +334,61 @@ public final class PluginUpdater extends JavaPlugin {
     }
 
     /**
-     * Finds installed plugins missing from config.yml. Network lookups run in the background.
+     * Looks for installed plugins that are neither in config.yml nor in modes.exclude_list and
+     * records them in plugins.json as pending (or unidentified). Nothing found is updated until an
+     * op confirms it. Must be called on the main thread; lookups run in the background.
      *
-     * @param add   add usable suggestions to config.yml
-     * @param only  restrict to one plugin name, or null
+     * @param requester gets a full report (manual /updateplugins discover); null for automatic runs
+     * @param force     look up unidentified plugins again
+     * @return false if a detection is already running
      */
-    public void discover(CommandSender sender, boolean add, String only) {
-        List<PluginDiscovery.Candidate> candidates = ServerPlugins.unconfigured(config.settings().plugins().keySet(), getName())
-                .stream().filter(c -> only == null || c.name().equalsIgnoreCase(only)).toList();
-        if (candidates.isEmpty()) {
-            messages.send(sender, only == null
-                    ? "<success>Every installed plugin is already in config.yml."
-                    : "<warning><name> is not installed or already in config.yml.", Messages.text("name", only));
-            return;
+    public boolean detect(CommandSender requester, boolean force) {
+        if (!detecting.compareAndSet(false, true)) {
+            detectAgain.set(true);
+            return false;
         }
-        messages.send(sender, "<primary>Looking up <accent><count></accent> plugins...", Messages.text("count", candidates.size()));
+        UpdaterSettings s = config.settings();
+        List<PluginDiscovery.Candidate> installed = ServerPlugins.candidates(getName());
+        java.util.Set<String> skip = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        skip.addAll(s.configuredNames());
+        skip.addAll(s.modes().excludeList());
         ModrinthSource lookup = modrinth;
-        background.execute(() -> {
-            List<PluginDiscovery.Suggestion> suggestions;
-            try {
-                suggestions = new PluginDiscovery(lookup::projectIdOf).discover(candidates);
-            } catch (IOException e) {
-                runSync(() -> messages.send(sender, "<error>Discovery was interrupted."));
-                return;
-            }
-            int added = 0;
-            if (add) {
-                for (PluginDiscovery.Suggestion s : suggestions) {
-                    if (config.addPlugin(s)) {
-                        added++;
-                    }
+        try {
+            detector.execute(() -> {
+                PluginRegistry.Changes changes = null;
+                Throwable failure = null;
+                try {
+                    changes = registry.detect(installed, skip, force, new PluginDiscovery(lookup::projectIdOf),
+                            java.time.Instant.now());
+                } catch (Throwable t) {
+                    failure = t;
+                } finally {
+                    detecting.set(false);
                 }
-            }
-            int addedCount = added;
-            runSync(() -> {
-                for (PluginDiscovery.Suggestion s : suggestions) {
-                    if (s.isUsable()) {
-                        messages.sendLine(sender, "<success>  + <name> <muted><version></muted> -> <accent><source></accent> <muted><options> (<reason>)",
-                                Messages.text("name", s.name()), Messages.text("version", s.version()),
-                                Messages.text("source", s.source()), Messages.text("options", s.options()),
-                                Messages.text("reason", s.reason()));
-                    } else {
-                        messages.sendLine(sender, "<warning>  ? <name> <muted><version>: <reason> — add it by hand",
-                                Messages.text("name", s.name()), Messages.text("version", s.version()),
-                                Messages.text("reason", s.reason()));
-                    }
+                PluginRegistry.Changes done = changes;
+                Throwable error = failure;
+                if (error != null && !(error instanceof java.io.InterruptedIOException)) {
+                    getLogger().warning("Plugin detection failed: " + error);
                 }
-                if (add) {
-                    messages.send(sender, "<primary>Added <accent><count></accent> plugins to config.yml.",
-                            Messages.text("count", addedCount));
-                } else {
-                    messages.send(sender, "<muted>Run <accent>/updateplugins discover add</accent> to add the usable ones.");
+                runSync(() -> {
+                    if (done != null) {
+                        reporter.onDetection(done, registry, requester);
+                    } else if (requester != null) {
+                        messages.send(requester, "<error>Plugin detection failed: <e>", Messages.text("e", String.valueOf(error)));
+                    }
+                    if (detectAgain.getAndSet(false) && config.settings().general().autoDetect()) {
+                        detect(null, false);
+                    }
+                });
+                if (error instanceof Error e) {
+                    throw e;
                 }
             });
-        });
+        } catch (java.util.concurrent.RejectedExecutionException e) {
+            detecting.set(false);
+            return false;
+        }
+        return true;
     }
 
     /** Runs a task on the main thread, if the plugin is still enabled. */
@@ -378,8 +408,39 @@ public final class PluginUpdater extends JavaPlugin {
         background.execute(task);
     }
 
+    /**
+     * Settings with every tracked plugin: config.yml entries plus plugins confirmed in plugins.json
+     * (config.yml wins on the same name).
+     */
     public UpdaterSettings settings() {
+        UpdaterSettings base = config.settings();
+        synchronized (effectiveLock) {
+            long revision = registry.revision();
+            if (effective == null || base != effectiveBase || revision != effectiveRevision) {
+                effective = base.withDetected(registry.confirmed());
+                effectiveBase = base;
+                effectiveRevision = revision;
+            }
+            return effective;
+        }
+    }
+
+    /** Settings from config.yml alone. */
+    public UpdaterSettings configSettings() {
         return config.settings();
+    }
+
+    /** True if config.yml has an entry for this plugin, valid or not (case-insensitive). */
+    public boolean inConfig(String plugin) {
+        return config.settings().inConfig(plugin);
+    }
+
+    public UpdateCommand commands() {
+        return command;
+    }
+
+    public PluginRegistry registry() {
+        return registry;
     }
 
     public List<String> configProblems() {

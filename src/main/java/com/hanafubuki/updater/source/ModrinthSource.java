@@ -96,7 +96,7 @@ public final class ModrinthSource implements UpdateSource {
 
     @Override
     public Optional<UpdateCandidate> findLatest(UpdateRequest request) throws IOException {
-        String installedSha512 = Checksum.hash(request.installed().jar(), Checksum.Algorithm.SHA512);
+        String installedSha512 = Checksum.hashCached(request.installed().jar(), Checksum.Algorithm.SHA512);
         Optional<KnownVersion> known = identify(installedSha512);
 
         String projectId = request.entry().string("project_id");
@@ -112,7 +112,9 @@ public final class ModrinthSource implements UpdateSource {
         List<String> versionTypes = orDefault(request.entry().list("version_types"), settings.versionTypes());
 
         URI uri = URI.create(baseUrl + "/project/" + encode(projectId) + "/version?loaders=" + encode(jsonArray(loaders))
-                + "&game_versions=" + encode(jsonArray(gameVersions)));
+                + "&game_versions=" + encode(jsonArray(gameVersions))
+                // The changelog is never used; leaving it out makes the answer (and the cache) much smaller.
+                + "&include_changelog=false");
         JsonArray versions = Json.parseArray(http.getOk(uri, Map.of("Accept", "application/json"), settings.source().apiTimeout()),
                 "Modrinth versions of " + projectId);
 
@@ -193,7 +195,7 @@ public final class ModrinthSource implements UpdateSource {
 
     /** Public view for auto-discovery: the Modrinth project id of a jar, if it is on Modrinth. */
     public Optional<String> projectIdOf(java.nio.file.Path jar) throws IOException {
-        return identify(Checksum.hash(jar, Checksum.Algorithm.SHA512)).map(KnownVersion::projectId);
+        return identify(Checksum.hashCached(jar, Checksum.Algorithm.SHA512)).map(KnownVersion::projectId);
     }
 
     private static boolean sameProject(KnownVersion known, JsonObject latest, String configuredProject) {

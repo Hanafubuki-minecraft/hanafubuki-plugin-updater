@@ -213,4 +213,25 @@ class BackupManagerTest {
     void pluginsWithBackupsIsEmptyWithoutFolder() throws IOException {
         assertEquals(List.of(), backups.pluginsWithBackups());
     }
+
+    @Test
+    void restoreFileStagesExactlyTheChosenBackup() throws IOException {
+        // Two different builds that report the same version: only the clicked file may be restored.
+        Path jar = TestJars.write(plugins, "Chunky.jar", TestJars.plugin("Chunky", "1.0", List.of(), "1.20"));
+        BackupManager.Backup first = backups.backup(new InstalledPlugin("Chunky", "1.0", jar), 5).orElseThrow();
+        tick();
+        jar = TestJars.write(plugins, "Chunky.jar", TestJars.plugin("Chunky", "1.0", List.of(), "1.21"));
+        BackupManager.Backup second = backups.backup(new InstalledPlugin("Chunky", "1.0", jar), 5).orElseThrow();
+        InstalledPlugin current = install("1.1");
+        assertEquals(2, backups.list("Chunky").size());
+
+        BackupManager.Backup restored = backups.restoreFile(first.file(), current, updateFolder);
+        assertEquals(first.file(), restored.file());
+        assertArrayEquals(Files.readAllBytes(first.file()), Files.readAllBytes(updateFolder.resolve("Chunky.jar")));
+        assertFalse(java.util.Arrays.equals(Files.readAllBytes(second.file()), Files.readAllBytes(updateFolder.resolve("Chunky.jar"))));
+
+        Path other = TestJars.write(dir, "other.jar", TestJars.plugin("Chunky", "0.1"));
+        IOException e = assertThrows(IOException.class, () -> backups.restoreFile(other, current, updateFolder));
+        assertTrue(e.getMessage().contains("No backup"), e.getMessage());
+    }
 }

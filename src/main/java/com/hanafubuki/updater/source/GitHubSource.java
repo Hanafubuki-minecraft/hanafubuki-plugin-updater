@@ -263,7 +263,9 @@ public final class GitHubSource implements UpdateSource {
                 if (glob.matcher(name).matches()) {
                     candidates.add(a);
                 }
-            } else if (lower.endsWith(".jar") && !lower.endsWith("-sources.jar") && !lower.endsWith("-javadoc.jar")) {
+            } else if (lower.endsWith(".jar") && !lower.endsWith("-sources.jar") && !lower.endsWith("-javadoc.jar")
+                    // maven-shade-plugin leaves the unshaded jar as original-<name>.jar next to the real one.
+                    && !lower.startsWith("original-")) {
                 candidates.add(a);
             }
         }

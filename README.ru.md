@@ -30,7 +30,8 @@
 - **Уязвимости** — GitHub security advisories для каждого плагина с `repo`, в консоли, в чате и в Discord
 - **Расписание** — каждые N минут, ежедневно или еженедельно в заданное время, при запуске или только проверка
 - **Уведомления** — «Plugin X updated, try restarting» для опов, напоминание при входе, вебхук Discord, общий JSON-вебхук
-- **GUI** — `/updateplugins gui`: состояние плагинов с первого взгляда, проверка / обновление / откат одним кликом
+- **Автоматический поиск** — установленные плагины, которых нет в конфиге, определяются (хеш на Modrinth, website из plugin.yml) и ждут в `plugins.json`, пока оп их не подтвердит; без вашего согласия ничего не обновляется
+- **GUI** — `/updateplugins gui`: состояние плагинов с первого взгляда, проверка / обновление / откат, подтверждение найденных плагинов одним кликом
 - **Гибкие права** — отдельное право на каждую подкоманду, удобно для LuckPerms
 - **Полностью асинхронно** — весь сетевой I/O вне основного потока, плагины проверяются параллельно, повторы с нарастающей задержкой, отмена через `/updateplugins stop`
 - **Наблюдаемость** — статистика по каждому плагину, `/updateplugins metrics`, JSON-логи, эндпоинты `/health` и `/metrics` для Prometheus
@@ -40,9 +41,12 @@
 1. Скачайте последний `.jar` из [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest).
 2. Положите его в `plugins/` и перезапустите сервер — появится `plugins/HanafubukiPluginUpdater/config.yml`.
    Плагинов в нём пока нет.
-3. Добавьте плагины в раздел `plugins:` или выполните `/updateplugins discover`, а при
-   `global.auto_discover: true` — `/updateplugins discover add`.
-4. `/updateplugins reload`, затем `/updateplugins check`, чтобы увидеть, что изменится.
+3. Апдейтер сам ищет установленные плагины (`global.auto_detect: true`), а опы
+   (`hanafubuki.updater.confirm`) получают сообщение с кликабельным `[review]`. Выполните
+   `/updateplugins pending`, затем `/updateplugins confirm <плагин>` (или `confirm all`) для тех, что нужно обновлять, и `reject <плагин>` для остальных — или через меню →
+   **Found plugins**. Плагины без источника или те, что хотите настроить сами, добавьте в раздел `plugins:`
+   в config.yml (и выполните `/updateplugins reload`).
+4. `/updateplugins check`, чтобы увидеть, что изменится.
 5. `/updateplugins update` и рестарт, когда придёт уведомление.
 
 ## Команды
@@ -61,7 +65,10 @@
 | `/updateplugins backups <плагин>` | Список сохранённых прошлых версий | `hanafubuki.updater.rollback` |
 | `/updateplugins rollback <плагин> [версия]` | Вернуть прошлую версию при следующем рестарте | `hanafubuki.updater.rollback` |
 | `/updateplugins unstage <плагин>` | Убрать скачанное обновление до рестарта, снова включить обновления после отката | `hanafubuki.updater.rollback` |
-| `/updateplugins discover [add] [плагин]` | Найти установленные плагины, которых нет в конфиге (и добавить их) | `hanafubuki.updater.discover` |
+| `/updateplugins pending` | Найденные плагины: ожидающие, без источника, подтверждённые, отклонённые | `hanafubuki.updater.confirm` |
+| `/updateplugins confirm <плагин\|all>` | Обновлять найденный плагин (или все ожидающие) с этого момента | `hanafubuki.updater.confirm` |
+| `/updateplugins reject <плагин>` | Не обновлять найденный плагин / скрыть плагин без источника (можно подтвердить позже) | `hanafubuki.updater.confirm` |
+| `/updateplugins discover` | Поискать новые плагины прямо сейчас | `hanafubuki.updater.discover` |
 | `/updateplugins notify test` | Отправить тестовое сообщение в Discord / вебхук | `hanafubuki.updater.notifytest` |
 | `/updateplugins gui` | Открыть меню | `hanafubuki.updater.gui` |
 | `/updateplugins reload` | Перезагрузить `config.yml` | `hanafubuki.updater.reload` |
@@ -72,7 +79,8 @@
 ## Права
 
 Все права по умолчанию у опов; `hanafubuki.updater.*` даёт всё. Кроме прав из таблицы выше,
-`hanafubuki.updater.notify` получает в игре сообщения об обновлениях и уязвимостях.
+`hanafubuki.updater.notify` получает в игре сообщения об обновлениях и уязвимостях; сообщения о найденных плагинах
+и напоминание о плагинах, ждущих подтверждения, получает `hanafubuki.updater.confirm`.
 
 С LuckPerms:
 
@@ -96,7 +104,7 @@
 global:
   min_version: ""              # установленные версии ниже этой не трогаются
   max_version: ""              # версии выше этой никогда не ставятся
-  auto_update_config: true     # записывать новую версию в запись плагина после обновления
+  auto_detect: true            # искать плагины не из конфига; они ждут в plugins.json команды /updateplugins confirm
   parallelism: 4
 
 modes:
@@ -145,6 +153,18 @@ plugins:
 можно задать `min_version`, `max_version` и `repo` (уязвимости с GitHub). `version` — только для справки;
 установленная версия берётся у сервера.
 
+### Файлы
+
+| Файл | Кто пишет | Содержимое |
+|---|---|---|
+| `config.yml` | вы | настройки и ваши записи плагинов. Создаётся при первом запуске, плагин его не меняет; его записи всегда важнее `plugins.json` |
+| `plugins.json` | апдейтер | автоматически найденные плагины и ваши решения (`pending`, `confirmed`, `rejected`, `unidentified`); не редактируйте, используйте команды или меню |
+| `state.json` | апдейтер | последний запуск, статистика, обновления, ждущие рестарта |
+
+Переход с 1.5.x: удалите `auto_update_config`, `auto_discover` и `auto_discover_on_startup` из `global`
+(пока они есть, о них сообщается как о проблемах конфига). Записи, добавленные раньше через discovery,
+остаются обычными записями.
+
 Полный справочник: [docs/configuration.md](docs/configuration.md). Заполненный пример со всеми источниками:
 [docs/config.example.yml](docs/config.example.yml).
 
@@ -184,7 +204,7 @@ plugins:
 Версия плагина хранится в одном месте — [`gradle.properties`](gradle.properties):
 
 ```properties
-version=1.5.2
+version=1.6.0
 ```
 
 Поднимите её и запушьте в `master` → GitHub Actions соберёт jar и опубликует релиз `v<version>` с автоматическими заметками.

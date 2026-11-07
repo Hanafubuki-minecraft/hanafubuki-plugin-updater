@@ -128,7 +128,8 @@ public final class HangarSource implements UpdateSource {
         }
 
         UpdateCandidate.Freshness freshness = UpdateCandidate.Freshness.UNKNOWN;
-        if (checksum != null && checksum.matches(request.installed().jar())) {
+        // Only a freshness hint (the download is verified separately), so the cached hash is fine here.
+        if (checksum != null && checksum.hex().equals(Checksum.hashCached(request.installed().jar(), checksum.algorithm()))) {
             freshness = UpdateCandidate.Freshness.SAME;
         }
         String name = Json.str(latest, "name");
