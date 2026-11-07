@@ -201,6 +201,27 @@ public final class StateStore {
         }
     }
 
+    /**
+     * Forgets staged updates that are no longer waiting, e.g. because a restart applied them.
+     *
+     * @param stillStaged true if the staged file of the plugin still exists
+     * @return names of the plugins whose staged record was removed
+     */
+    public synchronized java.util.List<String> reconcileStaged(java.util.function.Predicate<String> stillStaged) {
+        java.util.List<String> removed = new ArrayList<>();
+        data.plugins.forEach((name, s) -> {
+            if (s.staged_version != null && !stillStaged.test(name)) {
+                s.staged_version = null;
+                s.staged_at = null;
+                removed.add(name);
+            }
+        });
+        if (!removed.isEmpty()) {
+            save();
+        }
+        return removed;
+    }
+
     /** All plugins with a staged update, name to version. */
     public synchronized Map<String, String> allStaged() {
         Map<String, String> out = new TreeMap<>(String.CASE_INSENSITIVE_ORDER);

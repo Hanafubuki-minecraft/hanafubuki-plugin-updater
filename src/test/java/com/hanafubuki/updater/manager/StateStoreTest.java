@@ -37,6 +37,22 @@ class StateStoreTest {
     }
 
     @Test
+    void reconcileForgetsUpdatesAppliedByARestart() {
+        StateStore store = open();
+        store.recordResult(result("GSit", PluginResult.Status.UPDATED, "3.8.0"), T0);
+        store.recordResult(result("TAB", PluginResult.Status.UPDATED, "6.2.1"), T0);
+        store.recordResult(result("BlueMap", PluginResult.Status.UPDATED, "5.16-paper"), T0);
+
+        // After the restart Paper moved GSit and TAB out of the update folder; BlueMap is still waiting.
+        List<String> applied = store.reconcileStaged(name -> name.equals("BlueMap"));
+
+        assertEquals(List.of("GSit", "TAB"), applied.stream().sorted().toList());
+        assertEquals(Map.of("BlueMap", "5.16-paper"), Map.copyOf(store.allStaged()));
+        assertEquals(Map.of("BlueMap", "5.16-paper"), Map.copyOf(open().allStaged()), "the change is saved");
+        assertEquals(List.of(), store.reconcileStaged(name -> true));
+    }
+
+    @Test
     void stateSurvivesARestart() throws IOException {
         StateStore first = open();
         first.recordResult(result("LuckPerms", PluginResult.Status.UPDATED, "5.5.71"), T0);

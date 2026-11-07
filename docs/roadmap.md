@@ -52,6 +52,15 @@ Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
 
 ## Changelog
 
+### 1.5.2
+
+**Fixed**
+
+- When Modrinth has separate builds of the same version per loader (BlueMap `5.16-paper` and `5.16-spigot`),
+  the build for the first loader in `modrinth.loaders` is used, so Paper servers get the Paper build.
+- After a restart, players with `hanafubuki.updater.notify` were told that the just-applied updates still
+  wait for a restart; staged records are now checked against the update folder when the plugin starts.
+
 ### 1.5.1
 
 **Fixed**
