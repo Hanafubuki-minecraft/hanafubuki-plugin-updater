@@ -6,7 +6,8 @@ comment on every option. A filled-in configuration that uses every source is in
 [`config.example.yml`](config.example.yml) (the test `DefaultConfigTest` makes sure both files parse
 without a single problem).
 
-The default config tracks no plugins (`plugins: {}`), so nothing is updated until you add entries.
+The default config tracks no plugins (`plugins: {}`), so nothing is updated until you add entries or
+confirm plugins that automatic detection found (see [Found plugins](#found-plugins-pluginsjson)).
 
 - [How the file is read](#how-the-file-is-read)
 - [Secrets from environment variables](#secrets-from-environment-variables)
@@ -15,6 +16,7 @@ The default config tracks no plugins (`plugins: {}`), so nothing is updated unti
 - [Source sections](#source-sections) (`modrinth`, `github`, `hangar`, `spigotmc`, `custom`)
 - [`console`](#console) (including the JSON log format) · [`style`](#style) · [`health_check`](#health_check)
 - [`plugins`](#plugins) and the options of every source
+- [Found plugins (`plugins.json`)](#found-plugins-pluginsjson)
 - [Which plugins are checked](#which-plugins-are-checked) · [Version limits](#version-limits) · [Version comparison](#version-comparison)
 
 ## How the file is read
@@ -32,11 +34,13 @@ The default config tracks no plugins (`plugins: {}`), so nothing is updated unti
 - If the file is not valid YAML, the previous settings stay active (on first start: built-in defaults
   with no plugins) and the error is logged.
 - Plugin names may contain dots; they are handled as single keys.
-- The plugin writes to the file itself in two cases: `version` of an entry after an update
-  (`global.auto_update_config`) and new entries from auto-discovery. Comments are kept. Writes are
-  synchronized, so updates finishing on several threads cannot corrupt the file.
+- **The file belongs to you.** The plugin creates it on first start and never writes to it afterwards.
+  Plugins found automatically go to `plugins.json`, versions and statistics to `state.json`.
+- Keys removed in 1.6.0 (`global.auto_update_config`, `global.auto_discover`,
+  `global.auto_discover_on_startup`) are reported as problems ("removed in 1.6.0, delete this line") and
+  otherwise ignored.
 - `/updateplugins reload` re-reads the file, rebuilds all sources, restarts the schedule and the health
-  endpoint. It is refused while a run is active.
+  endpoint and, with `auto_detect`, runs the automatic detection. It is refused while a run is active.
 
 ## Secrets from environment variables
 
@@ -66,9 +70,7 @@ With Crafty Controller / Docker, set the variables on the server container.
 |---|---|---|---|
 | `min_version` | `""` | version or empty | Plugins whose **installed** version is below this are not updated. See [Version limits](#version-limits). |
 | `max_version` | `""` | version or empty | **New** versions above this are never installed. |
-| `auto_update_config` | `true` | bool | After an update is staged, write the new version into the entry's `version` key. |
-| `auto_discover` | `false` | bool | Allow `/updateplugins discover add` to add plugins to the config. Listing works without it. |
-| `auto_discover_on_startup` | `false` | bool | Run discovery once after startup and **add** every plugin it can identify (independent of `auto_discover`). |
+| `auto_detect` | `true` | bool | Look for installed plugins that are not under `plugins:` at startup, before every scheduled check and after `/updateplugins reload`. Found plugins are written to `plugins.json` and are **not** updated until an op confirms them. `/updateplugins discover` works also when this is off. See [Found plugins](#found-plugins-pluginsjson). |
 | `parallelism` | `4` | 1–16 | Plugins checked at the same time. |
 | `max_download_mb` | `256` | 1–2048 | Largest accepted plugin jar. Larger downloads are aborted. |
 
@@ -78,9 +80,12 @@ Empty, `none`, `latest` and `*` mean "no limit" for `min_version` / `max_version
 
 | Key | Default | Meaning |
 |---|---|---|
-| `include_only` | `false` | `true`: only plugins in `include_list` are updated. `false`: every plugin under `plugins:` is updated, except `exclude_list`. |
+| `include_only` | `false` | `true`: only plugins in `include_list` are updated. `false`: every tracked plugin (under `plugins:` or confirmed in plugins.json) is updated, except `exclude_list`. |
 | `include_list` | `[]` | Plugin names (case-insensitive). Used only when `include_only: true`. |
-| `exclude_list` | `[]` | Never updated, in both modes and also when named explicitly in a command. |
+| `exclude_list` | `[]` | Never updated, in both modes and also when named explicitly in a command. Automatic detection skips these plugins too. |
+
+Both lists apply to confirmed found plugins the same way as to config.yml entries; `/updateplugins confirm`
+warns when a plugin it confirms is still filtered out by them.
 
 See [Which plugins are checked](#which-plugins-are-checked).
 
@@ -143,13 +148,16 @@ With `in_game: true`, `ResultReporter` sends, as soon as each plugin is done:
 
 - for every staged update: **`Plugin <name> updated, try restarting (<old> → <new>)`**;
 - for every security advisory that affects an installed version: a line with severity, summary, GHSA id and
-  patched versions.
+  patched versions;
+- when automatic detection finds plugins that wait for confirmation: `New plugin(s) found: A, B. They wait for
+  confirmation. [review]` (click runs `/updateplugins pending`).
 
 The player who started a run (command or GUI) additionally gets a summary and one line for every plugin
 that is not up to date when the run ends.
 
 With `on_join: true`, players with `hanafubuki.updater.notify` get on join:
 
+- `N new plugin(s) found, waiting for confirmation: A, B [review]`;
 - `N plugin update(s) wait for a restart: A, B` (read from `state.json`, so this survives restarts until the
   update is applied);
 - the security advisories found by the last run since the server started.
@@ -323,6 +331,16 @@ Each object has `time` (ISO-8601) and `event`; fields with an unknown (`null`) v
 | `notes` | warnings, e.g. "publishes no checksum" |
 | `alerts` | `id`, `severity`, `summary`, `patched_versions` of each advisory |
 
+Automatic detection writes one `plugins_detected` line when it changed something:
+
+```json
+{"time":"2026-10-31T01:29:59.871Z","event":"plugins_detected","pending":["LuckPerms"],"unidentified":["MyLocalPlugin"],"removed":[]}
+```
+
+`pending`: plugins that now wait for confirmation; `unidentified`: new plugins without a source; `removed`:
+undecided plugins that were uninstalled or now have a config.yml entry. Without `json_format` the same is
+written as text lines.
+
 ## `style`
 
 MiniMessage styles for chat, console and the GUI, the same scheme as the other Hanafubuki plugins.
@@ -360,9 +378,10 @@ Only `GET` is answered (other methods get `405`). Responses carry `Cache-Control
 ```json
 {
   "status": "UP",
-  "version": "1.5.0",
+  "version": "1.6.0",
   "running": false,
   "plugins_tracked": 11,
+  "plugins_pending": 2,
   "staged_updates": 1,
   "last_run": {
     "trigger": "schedule",
@@ -375,7 +394,8 @@ Only `GET` is answered (other methods get `405`). Responses carry `Cache-Control
 }
 ```
 
-`last_run` is missing before the first run; `counts` uses the status names as stored in `state.json`. If
+`plugins_tracked` counts config.yml entries plus confirmed found plugins; `plugins_pending` counts found plugins
+waiting for confirmation. `last_run` is missing before the first run; `counts` uses the status names as stored in `state.json`. If
 building the answer fails, the endpoint returns `500` with `{"status":"ERROR"}`.
 
 `GET /metrics` → Prometheus text format (`text/plain; version=0.0.4`), counters since the server started
@@ -391,7 +411,7 @@ building the answer fails, the endpoint returns `500` with `{"status":"ERROR"}`.
 | `hanafubuki_updater_errors_total` | counter | Checks that failed with an error (network, API, verification). Config errors and cancellations are not counted |
 | `hanafubuki_updater_security_alerts_total` | counter | Security advisories found |
 | `hanafubuki_updater_last_run_timestamp_ms` | gauge | End of the last run, epoch milliseconds (0 = none yet) |
-| `hanafubuki_updater_plugins_tracked` | gauge | Entries under `plugins:` |
+| `hanafubuki_updater_plugins_tracked` | gauge | Entries under `plugins:` plus confirmed found plugins |
 
 The same counters are shown by `/updateplugins metrics` (`--prometheus` / `-p` prints the Prometheus lines).
 
@@ -406,13 +426,15 @@ Keys every entry understands:
 | Key | Required | Meaning |
 |---|---|---|
 | `source` | yes | `modrinth`, `github`, `hangar`, `spigotmc`, `local` or `custom` |
-| `version` | no | Informational only. The installed version is always read from the server. Written by `auto_update_config`. |
+| `version` | no | Informational only, never written by the plugin. The installed version is always read from the server. |
 | `min_version` | no | Replaces `global.min_version` for this plugin. |
 | `max_version` | no | Replaces `global.max_version` for this plugin. |
 | `repo` | no | GitHub `owner/repo`. Required for the `github` source; for every other source it enables the security advisory check. |
 
 An entry with an invalid option (wrong format, missing required key) fails its check with
 `invalid config: …` and does not affect other plugins. How each source works in detail: [api.md](api.md).
+
+An entry here always wins over a plugin with the same name in `plugins.json` (case-insensitive).
 
 ### `modrinth`
 
@@ -532,11 +554,98 @@ InternalTools:
     token: "${CI_TOKEN}"
 ```
 
+## Found plugins (`plugins.json`)
+
+`plugins/HanafubukiPluginUpdater/plugins.json` holds the plugins that automatic detection found. Only the
+updater writes it; you decide with `/updateplugins pending`, `confirm <plugin|all>`, `reject <plugin>` or the
+menu (**Found plugins**). The three files have separate owners:
+
+| File | Written by | Contents |
+|---|---|---|
+| `config.yml` | you | settings and your plugin entries; never written by the plugin after the first start |
+| `plugins.json` | the updater | found plugins and your decisions |
+| `state.json` | the updater | last run, per-plugin checks and statistics, staged updates, holds after a rollback |
+
+The tracked plugins are the config.yml entries plus the **confirmed** plugins.json entries. On the same name
+(case-insensitive) config.yml wins, so writing an entry by hand is always the way to override what was found.
+Runs, `status`, the GUI, tab completion, `/health` and the metrics all use this combined list.
+
+**When detection runs**: one tick after startup, before every scheduled check (trigger `schedule`, not the
+`check_on_startup` run) and after `/updateplugins reload`, when `global.auto_detect` is on; and on
+`/updateplugins discover` in any case. Plugins it finds are not part of the run that follows: they wait for
+confirmation.
+
+**What it looks at**: every loaded plugin jar except the updater itself, minus names under `plugins:` and in
+`modes.exclude_list`. A new plugin is looked up the same way for every source (lookups run on a background
+thread):
+
+1. the installed jar's SHA-512 on Modrinth: the file itself is published there → `modrinth` with `project_id`;
+2. the `website` in plugin.yml / paper-plugin.yml: a Modrinth, Hangar, SpigotMC resource or GitHub repository
+   page → that source with `project_id`, `project_slug`, `resource_id` or `repo`.
+
+A GitHub suggestion has no `asset_pattern`; if the releases contain several jars the first check fails and
+asks for one (write a config.yml entry with `asset_pattern`).
+
+**Statuses**:
+
+| Status | Meaning | Updated? |
+|---|---|---|
+| `pending` | source found, waiting for an op | no |
+| `confirmed` | confirmed with `confirm` or the menu | yes, like a config.yml entry |
+| `rejected` | rejected (or hidden) with `reject` or the menu; can be confirmed later | no |
+| `unidentified` | no source found. Cannot be confirmed: add a config.yml entry instead | no |
+
+- Known plugins are not looked up again. An `unidentified` plugin is looked up again when its installed
+  version changes, when the last lookup failed for a network reason, or on `/updateplugins discover`.
+- `pending` and `unidentified` entries are removed when the plugin is uninstalled or gets a config.yml entry
+  (or is added to `exclude_list`). `confirmed` and `rejected` entries are kept, so the decision survives.
+- `confirm all` confirms every `pending` plugin.
+
+Example:
+
+```json
+{
+  "_comment": "Written by the plugin updater. Do not edit: decide with /updateplugins pending, confirm <plugin> or reject <plugin>, or add the plugin to config.yml (config.yml always wins).",
+  "version": 1,
+  "plugins": {
+    "LuckPerms": {
+      "status": "confirmed",
+      "source": "modrinth",
+      "options": { "project_id": "Vebnzrzj" },
+      "reason": "the installed jar is published on Modrinth",
+      "version": "5.5.17",
+      "discovered_at": "2026-10-30T18:02:11.204Z",
+      "decided_at": "2026-10-30T18:05:40.981Z",
+      "decided_by": "Steve"
+    },
+    "MyLocalPlugin": {
+      "status": "unidentified",
+      "reason": "not on Modrinth and no website in plugin.yml",
+      "version": "1.0.0",
+      "discovered_at": "2026-10-30T18:02:11.204Z"
+    }
+  }
+}
+```
+
+| Field | Meaning |
+|---|---|
+| `status` | `pending`, `confirmed`, `rejected` or `unidentified` |
+| `source`, `options` | source id and its options, the same keys as a config.yml entry; values are stored as strings |
+| `reason` | how the source was found, or why not |
+| `version` | installed version when the plugin was last looked at |
+| `discovered_at`, `decided_at`, `decided_by` | when it was found, when and by whom (player name or `console`) it was confirmed or rejected |
+| `retry` | `true` if the last lookup failed for a network reason; the next detection tries again |
+
+The file is written atomically (temporary file, then rename). If it cannot be read, it is moved to
+`plugins.json.broken` and the updater starts with an empty list (found plugins are looked up again and wait
+for a new decision).
+
 ## Which plugins are checked
 
 ```mermaid
 flowchart TD
-    A[Entry under plugins:] --> B{Plugins named in the command?}
+    A[Entry under plugins: or confirmed in plugins.json] --> B{Plugins named in the command?}
     B -->|yes| C{Entry named?}
     C -->|no| X[not part of the run]
     C -->|yes| E{In exclude_list?}
@@ -551,8 +660,9 @@ flowchart TD
 
 - `/updateplugins update LuckPerms ViaVersion` (or `check …`, or a click on a plugin in the GUI) runs only
   the named plugins. Named plugins bypass `include_only` but **not** `exclude_list`. A name that is not
-  configured is reported as `SKIPPED` ("not configured in config.yml").
-- Without names, the run covers all configured plugins filtered by `modes`.
+  tracked is reported as `SKIPPED` ("not tracked: not in config.yml and not confirmed in plugins.json").
+- Without names, the run covers all tracked plugins (config.yml entries and confirmed found plugins) filtered
+  by `modes`.
 - A plugin that was rolled back is skipped until its hold is released (see
   [architecture.md](architecture.md#backups-and-rollback)).
 

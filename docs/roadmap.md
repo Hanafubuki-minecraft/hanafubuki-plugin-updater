@@ -1,8 +1,8 @@
 # Roadmap
 
-## Status in 1.5.0
+## Status in 1.6.0
 
-Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
+Everything planned for v1.1 to v1.5 is implemented since 1.5.0.
 
 ### v1.1 – Reliability and observability
 
@@ -49,8 +49,67 @@ Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
 
 - [x] Source interface (`UpdateSource`) for all six sources
 - [x] Plugin discovery with evidence (Modrinth hash, website) instead of guessing
+- [x] Automatic detection with op confirmation (`plugins.json`), config.yml never written by the plugin (1.6.0)
 
 ## Changelog
+
+### 1.6.0
+
+**Added**
+
+- Automatic detection (`global.auto_detect`, default `true`): at startup, before every scheduled check and
+  after `/updateplugins reload`, installed plugins that are neither in config.yml nor in `modes.exclude_list`
+  are identified (Modrinth hash of the jar, then the plugin.yml `website`) and stored in the new
+  `plugins.json` as `pending` or `unidentified`. Nothing found is updated until an op confirms it.
+- `plugins.json`: found plugins with status, source, options, how they were found, version, dates and who
+  decided. Written only by the updater, atomically; a broken file is kept as `plugins.json.broken`.
+- `/updateplugins pending`, `confirm <plugin|all>`, `reject <plugin>` and the permission
+  `hanafubuki.updater.confirm` (default op, part of `hanafubuki.updater.*`). Clickable `[confirm]`,
+  `[reject]` and `[hide]` in chat.
+- GUI: **Found plugins** button (slot 46, a bell when plugins wait) and view (orange waiting, lime confirmed,
+  red rejected, gray no source; left click confirm, right click reject, **Confirm all waiting**, **Search
+  now**). Plugin items show whether they come from config.yml or plugins.json.
+- Players with `hanafubuki.updater.notify` get "New plugin(s) found … [review]" when detection finds plugins,
+  and on join the number of plugins waiting for confirmation.
+- `/health`: `plugins_pending`. JSON log event `plugins_detected`.
+
+**Changed**
+
+- config.yml belongs to the user: the plugin creates it on first start and never writes to it again. Its
+  `plugins:` entries always win over plugins.json (case-insensitive name). Versions are kept only in
+  `state.json`; `version` in plugin entries is informational and never written.
+- Tracked plugins (runs, `status`, GUI, tab completion, `/health` `plugins_tracked`, metrics) = config.yml
+  entries + confirmed plugins.json entries. `modes.include_only` / `exclude_list` apply to confirmed plugins
+  too; `confirm` warns when a plugin is still filtered out.
+- `/updateplugins discover` searches now and looks up plugins without a source again; results go to
+  plugins.json. Unidentified plugins are also retried when their version changes or the last lookup failed
+  for a network reason.
+- GUI clicks are handled one tick after the click event (Bukkit does not allow opening or closing inventories
+  inside it); this also prevents double actions.
+
+**Removed**
+
+- `global.auto_update_config`, `global.auto_discover`, `global.auto_discover_on_startup`. If present they are
+  reported as config problems ("removed in 1.6.0, delete this line"); the plugin keeps working.
+- `/updateplugins discover add` (prints a hint to use `pending` / `confirm`).
+
+**Performance**
+
+- The HTTP ETag cache is limited to about 8 MB of response text as well as 512 entries; bodies above a quarter
+  of that are not cached.
+- SHA-512 / SHA-256 of installed jars are cached by path, size and modification time, so checks no longer
+  re-hash large jars every time.
+- The background and notification threads exit after 30 s without work and start again on demand.
+- The startup reconciliation of staged updates does its file checks off the main thread; detection lookups
+  run on the background thread.
+
+**Breaking / migration**
+
+- Delete the three removed `global` keys from config.yml.
+- Entries that `discover add` or `auto_discover_on_startup` added to config.yml in earlier versions stay as
+  normal manual entries; nothing has to be moved.
+- Plugins that were not in config.yml are found again and wait for confirmation; run
+  `/updateplugins pending` after the update.
 
 ### 1.5.3
 

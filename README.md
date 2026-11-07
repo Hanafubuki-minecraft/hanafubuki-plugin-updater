@@ -30,7 +30,8 @@ and Paper swaps them in on the next restart.
 - **Security advisories** — GitHub advisories for every plugin with a `repo`, reported in console, chat and Discord
 - **Schedule** — every N minutes, daily or weekly at a fixed time, on startup, or check-only
 - **Notifications** — "Plugin X updated, try restarting" for ops, join reminders, Discord webhook, generic JSON webhook
-- **GUI** — `/updateplugins gui`: plugin states at a glance, check / update / roll back with a click
+- **Automatic detection** — installed plugins missing from the config are identified (Modrinth hash, plugin.yml website) and wait in `plugins.json` until an op confirms them; nothing is updated without your OK
+- **GUI** — `/updateplugins gui`: plugin states at a glance, check / update / roll back, confirm found plugins with a click
 - **Fine-grained permissions** — one node per sub-command, ready for LuckPerms
 - **Fully async** — all network I/O off the main thread, plugins checked in parallel, retries with backoff, cancellable with `/updateplugins stop`
 - **Observability** — statistics per plugin, `/updateplugins metrics`, JSON log lines, `/health` and Prometheus `/metrics` endpoint
@@ -40,9 +41,12 @@ and Paper swaps them in on the next restart.
 1. Download the latest `.jar` from [Releases](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest).
 2. Put it into `plugins/` and restart the server — `plugins/HanafubukiPluginUpdater/config.yml` is created.
    It tracks no plugins yet.
-3. Add your plugins to the `plugins:` section, or run `/updateplugins discover` and, with
-   `global.auto_discover: true`, `/updateplugins discover add`.
-4. `/updateplugins reload`, then `/updateplugins check` to see what would change.
+3. The updater looks for installed plugins on its own (`global.auto_detect: true`) and ops get a message with
+   a clickable `[review]`. Run `/updateplugins pending`, then `/updateplugins confirm <plugin>` (or `confirm all`)
+   for the ones to update, `reject <plugin>` for the rest — or use the menu → **Found plugins**.
+   Plugins without a source, or that you want to set up yourself, go into the `plugins:` section of config.yml
+   (followed by `/updateplugins reload`).
+4. `/updateplugins check` to see what would change.
 5. `/updateplugins update`, and restart when ops are notified.
 
 ## Commands
@@ -61,7 +65,10 @@ and Paper swaps them in on the next restart.
 | `/updateplugins backups <plugin>` | List stored previous versions | `hanafubuki.updater.rollback` |
 | `/updateplugins rollback <plugin> [version]` | Restore a previous version on the next restart | `hanafubuki.updater.rollback` |
 | `/updateplugins unstage <plugin>` | Remove a downloaded update before restart, resume updates after a rollback | `hanafubuki.updater.rollback` |
-| `/updateplugins discover [add] [plugin]` | Find installed plugins missing from the config (and add them) | `hanafubuki.updater.discover` |
+| `/updateplugins pending` | Found plugins: waiting, without a source, confirmed, rejected | `hanafubuki.updater.confirm` |
+| `/updateplugins confirm <plugin\|all>` | Update a found plugin (or all waiting ones) from now on | `hanafubuki.updater.confirm` |
+| `/updateplugins reject <plugin>` | Don't update a found plugin / hide one without a source (can be confirmed later) | `hanafubuki.updater.confirm` |
+| `/updateplugins discover` | Search for new plugins now | `hanafubuki.updater.discover` |
 | `/updateplugins notify test` | Send a test Discord / webhook message | `hanafubuki.updater.notifytest` |
 | `/updateplugins gui` | Open the menu | `hanafubuki.updater.gui` |
 | `/updateplugins reload` | Reload `config.yml` | `hanafubuki.updater.reload` |
@@ -72,7 +79,7 @@ More detail and the GUI: [docs/index.md](docs/index.md).
 ## Permissions
 
 All nodes default to op; `hanafubuki.updater.*` grants everything. Besides the nodes in the table above,
-`hanafubuki.updater.notify` receives in-game update and security messages.
+`hanafubuki.updater.notify` receives in-game update, security and "new plugin found" messages.
 
 With LuckPerms:
 
@@ -96,7 +103,7 @@ With LuckPerms:
 global:
   min_version: ""              # installed versions below this are left alone
   max_version: ""              # never install versions above this
-  auto_update_config: true     # write the new version into the entry after an update
+  auto_detect: true            # find unconfigured plugins; they wait in plugins.json for /updateplugins confirm
   parallelism: 4
 
 modes:
@@ -145,6 +152,18 @@ Every download must also be a plugin jar with the same `name` as the installed p
 `min_version`, `max_version` and `repo` (GitHub security advisories). `version` is informational; the
 installed version is read from the server.
 
+### Files
+
+| File | Written by | Contents |
+|---|---|---|
+| `config.yml` | you | settings and your plugin entries. Created on first start, never changed by the plugin; its entries always win over `plugins.json` |
+| `plugins.json` | the updater | plugins found automatically and your decisions (`pending`, `confirmed`, `rejected`, `unidentified`); do not edit, use the commands or the menu |
+| `state.json` | the updater | last run, statistics, updates waiting for a restart |
+
+Upgrading from 1.5.x: delete `auto_update_config`, `auto_discover` and `auto_discover_on_startup` from
+`global` (they are reported as config problems until you do). Entries added by discovery earlier stay as
+normal entries.
+
 Full reference: [docs/configuration.md](docs/configuration.md). Filled-in example with every source:
 [docs/config.example.yml](docs/config.example.yml).
 
@@ -182,7 +201,7 @@ If you want to anyway: Java 21.
 The plugin version lives in a single place — [`gradle.properties`](gradle.properties):
 
 ```properties
-version=1.5.3
+version=1.6.0
 ```
 
 Bump it and push to `master` → GitHub Actions builds the jar and publishes release `v<version>` with auto-generated notes.

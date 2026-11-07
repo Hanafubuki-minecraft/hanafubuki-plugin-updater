@@ -96,8 +96,9 @@ failing.
 2. Commit and push to `master`.
 3. `release.yml` builds and publishes release `v<version>`.
 
-The release jar is what servers download; this updater can update itself if you add an entry with
-`source: github` and `repo: Hanafubuki-minecraft/hanafubuki-plugin-updater`.
+The release jar is what servers download; this updater can update itself if you add a config.yml entry with
+`source: github` and `repo: Hanafubuki-minecraft/hanafubuki-plugin-updater` (automatic detection skips the
+updater itself).
 
 ## Adding a source
 
@@ -117,8 +118,8 @@ The release jar is what servers download; this updater can update itself if you 
 ## Conventions
 
 - Java 21, package `com.hanafubuki.updater`, group `com.hanafubuki`.
-- No network or file I/O on the server main thread; Bukkit calls only on the main thread
-  (`PluginUpdater.runSync`).
+- No network or file I/O on the server main thread (the one exception is the small `plugins.json` write on
+  confirm / reject); Bukkit calls only on the main thread (`PluginUpdater.runSync`).
 - Core packages stay free of `org.bukkit` imports.
 - Messages use MiniMessage templates with the style tags `<primary> <accent> <success> <warning> <error>
   <muted>`; values go in through `Messages.text(...)` (plain text).

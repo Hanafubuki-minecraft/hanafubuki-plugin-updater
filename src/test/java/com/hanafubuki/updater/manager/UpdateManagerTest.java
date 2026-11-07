@@ -584,7 +584,7 @@ class UpdateManagerTest {
         assertEquals(PluginResult.Status.SKIPPED, results.get("Vault").status());
         assertTrue(results.get("Vault").message().contains("exclude_list"));
         assertEquals(PluginResult.Status.SKIPPED, results.get("NoSuchPlugin").status());
-        assertTrue(results.get("NoSuchPlugin").message().contains("not configured"));
+        assertTrue(results.get("NoSuchPlugin").message().contains("not tracked"));
         assertEquals(List.of("Chunky"), source.calls);
         assertEquals(List.of("command:Steve|true|1"), listener.started);
     }

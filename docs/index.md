@@ -19,8 +19,12 @@ jar's file name. Paper swaps them in on the next restart; running jars are never
 
 1. Put the jar from the [latest release](https://github.com/Hanafubuki-minecraft/hanafubuki-plugin-updater/releases/latest)
    into `plugins/` and restart. `plugins/HanafubukiPluginUpdater/config.yml` is created; it tracks no plugins yet.
-2. Run `/updateplugins discover` to see which installed plugins can be identified. Set
-   `global.auto_discover: true` and run `/updateplugins discover add` to add them, or write entries by hand:
+2. With `global.auto_detect: true` (the default) the updater looks at every installed plugin one tick after
+   startup and identifies its source (Modrinth hash of the jar, or the `website` in plugin.yml). Found plugins
+   are written to `plugins.json` as **waiting for confirmation** and are **not updated** until you decide.
+   Ops get a message with a clickable `[review]`. Run `/updateplugins pending` (or open the menu → **Found
+   plugins**), then `/updateplugins confirm <plugin>` or `confirm all`; `reject <plugin>` for the ones you
+   don't want updated. Plugins without a source, or that you want to configure yourself, go into config.yml:
 
    ```yaml
    plugins:
@@ -31,9 +35,19 @@ jar's file name. Paper swaps them in on the next restart; running jars are never
        project_slug: ViaVersion
    ```
 
-3. `/updateplugins reload`, then `/updateplugins check` to see what would be updated.
+3. `/updateplugins reload` after editing config.yml, then `/updateplugins check` to see what would be updated.
 4. `/updateplugins update` downloads the updates. Ops get "Plugin X updated, try restarting".
 5. Restart the server. Optional: set `schedule.mode: daily` for automatic runs.
+
+## Found plugins
+
+Automatic detection (`global.auto_detect`, default on) runs one tick after startup, before every scheduled
+check and after `/updateplugins reload`; `/updateplugins discover` runs it by hand. It looks only at plugins
+that are neither in config.yml `plugins:` nor in `modes.exclude_list`, and **never updates anything on its
+own**: a found plugin is updated only after an op confirms it. When new plugins wait for confirmation, players
+with `hanafubuki.updater.notify` get a message with a clickable `[review]` (if `notifications.in_game` is on),
+and on join (if `notifications.on_join` is on) they are told how many still wait. Details:
+[configuration.md → Found plugins](configuration.md#found-plugins-pluginsjson).
 
 ## Commands
 
@@ -53,16 +67,24 @@ its own node. All nodes default to op.
 | `/updateplugins backups <plugin>` | List stored previous versions | `hanafubuki.updater.rollback` |
 | `/updateplugins rollback <plugin> [version]` | Stage a backup (newest if no version) for the next restart and pause updates of that plugin | `hanafubuki.updater.rollback` |
 | `/updateplugins unstage <plugin>` | Delete the plugin's staged file and resume its updates | `hanafubuki.updater.rollback` |
-| `/updateplugins discover [plugin]` | List installed plugins missing from config.yml with a suggested source | `hanafubuki.updater.discover` |
-| `/updateplugins discover add [plugin\|all]` | Add the identified ones to config.yml (needs `global.auto_discover: true`) | `hanafubuki.updater.discover` |
+| `/updateplugins pending` | Found plugins: waiting (source, options, how it was found; clickable `[confirm]` / `[reject]` for players), without a source (`[hide]`), confirmed, rejected | `hanafubuki.updater.confirm` |
+| `/updateplugins confirm <plugin\|all>` | Update a found plugin from now on (a waiting or rejected one), or every waiting one | `hanafubuki.updater.confirm` |
+| `/updateplugins reject <plugin>` | Stop updating a found plugin, or hide one without a source; can be confirmed later | `hanafubuki.updater.confirm` |
+| `/updateplugins discover` | Search for new plugins now; also looks up plugins without a source again | `hanafubuki.updater.discover` |
 | `/updateplugins notify test` | Send a test Discord / webhook message | `hanafubuki.updater.notifytest` |
 | `/updateplugins gui` | Open the menu (players only) | `hanafubuki.updater.gui` |
 | `/updateplugins reload` | Reload config.yml and list its problems | `hanafubuki.updater.reload` |
 | `/updateplugins help` | List the sub-commands you may use | `hanafubuki.updater.use` |
 
 Only one run can be active. Plugin names in commands are case-insensitive; tab completion offers sub-commands
-you have permission for and configured plugin names. `reload`, `rollback` and `unstage` are refused while a run
+you have permission for and tracked plugin names (config.yml entries and confirmed found plugins); `confirm` and
+`reject` complete the found plugins they apply to. `reload`, `rollback` and `unstage` are refused while a run
 is active.
+
+Found plugins without a source (`unidentified`) cannot be confirmed: add a config.yml entry for them instead.
+`confirm` warns when the plugin is in `modes.exclude_list`, or when `modes.include_only` is on and the plugin
+is not in `include_list`, because then it is still not updated. `discover add` from 1.5.x was removed; it now
+only prints a hint.
 
 ## Permissions
 
@@ -77,11 +99,12 @@ is active.
 | `hanafubuki.updater.stats` | `stats` |
 | `hanafubuki.updater.metrics` | `metrics` |
 | `hanafubuki.updater.rollback` | `backups`, `rollback`, `unstage`; GUI right click and backups view |
-| `hanafubuki.updater.discover` | `discover`, `discover add` |
+| `hanafubuki.updater.discover` | `discover`; GUI "Search now" |
+| `hanafubuki.updater.confirm` | `pending`, `confirm`, `reject`; GUI found plugins view (together with `gui`) |
 | `hanafubuki.updater.reload` | `reload`; GUI "Reload config" |
 | `hanafubuki.updater.notifytest` | `notify test` |
 | `hanafubuki.updater.gui` | `gui` |
-| `hanafubuki.updater.notify` | receive in-game update and security messages and on-join reminders |
+| `hanafubuki.updater.notify` | receive in-game update, security and "new plugin found" messages and on-join reminders |
 
 Examples with LuckPerms:
 
@@ -101,7 +124,8 @@ An explicit `false` overrides the op default, so the last example works for oppe
 
 ## GUI
 
-`/updateplugins gui` opens a 6-row menu with one item per configured plugin (45 per page):
+`/updateplugins gui` opens a 6-row menu with one item per tracked plugin (config.yml entries and confirmed
+found plugins, 45 per page):
 
 | Colour | State |
 |---|---|
@@ -113,7 +137,8 @@ An explicit `false` overrides the op default, so the last example works for oppe
 | red | the last check failed or was blocked |
 | gray | not installed, or not checked since the server started |
 
-The lore shows source, installed version, latest seen version, checks/updates/failures and the last check.
+The lore shows source, where the entry comes from (`config.yml` or `plugins.json`), installed version, latest
+seen version, checks/updates/failures and the last check.
 
 | Click on a plugin | Action | Permission |
 |---|---|---|
@@ -121,19 +146,38 @@ The lore shows source, installed version, latest seen version, checks/updates/fa
 | shift + left | update this plugin | `update` |
 | right | open its backups | `rollback` |
 
-Bottom row: previous page, **Check all**, **Update all**, **Status** (hover for running state, schedule, next
-and last run, staged count), **Stop**, **Reload config**, next page.
+Bottom row: previous page, **Found plugins** (a bell with the count when plugins wait for confirmation),
+**Check all**, **Update all**, **Status** (hover for running state, schedule, next and last run, staged count),
+**Stop**, **Reload config**, next page.
+
+Found plugins view (needs `gui` and `confirm`): one item per plugins.json entry, those that need a decision
+first.
+
+| Colour | State |
+|---|---|
+| orange | waiting for confirmation, not updated |
+| lime | confirmed, updated |
+| red | rejected, not updated |
+| gray | no source found |
+
+The lore shows installed version, source and options, how it was found, when it was found and who decided.
+Left click confirms, right click rejects (hides a plugin without a source). **Confirm all waiting** confirms
+every waiting plugin, **Back** returns to the main view, **Search now** runs `discover` (needs `discover`);
+arrows page through the list.
 
 Backups view: one chest per backup (version, date, size); a click stages that version for the next restart
 (same as `rollback`). **Remove staged update** runs `unstage`; **Back** returns to the main view.
 
 Every action checks the same permission as the matching command. Items cannot be taken out of the menu.
+Clicks are handled one tick after the click event (Bukkit does not allow opening or closing inventories inside
+it), which also prevents an action from running twice.
 
 ## Files
 
 | Path | Contents |
 |---|---|
-| `plugins/HanafubukiPluginUpdater/config.yml` | configuration |
+| `plugins/HanafubukiPluginUpdater/config.yml` | your configuration. Created on first start, never written by the plugin afterwards. Its `plugins:` entries always win over plugins.json |
+| `plugins/HanafubukiPluginUpdater/plugins.json` | plugins found automatically and your decisions (`pending`, `confirmed`, `rejected`, `unidentified`). Written only by the updater: do not edit, use the commands or the menu |
 | `plugins/HanafubukiPluginUpdater/state.json` | last run, per-plugin statistics, staged and held versions |
 | `plugins/HanafubukiPluginUpdater/backups/<Plugin>/<version>__<epochMillis>.jar` | backups |
 | `plugins/update/` (Bukkit `settings.update-folder`) | staged updates, applied by Paper on restart |
@@ -148,6 +192,9 @@ Every action checks the same permission as the matching command. Items cannot be
 | `The installed jar is not a file published on Modrinth` | The jar was downloaded from another site (SpigotMC, Hangar, GitHub) or modified. Set `project_id` to the slug from the plugin's `modrinth.com/plugin/<slug>` page. After the first update from Modrinth the hash is known and `project_id` is optional. |
 | `GitHub rejected github.token (HTTP 401 ...)` | The token is mistyped, expired or revoked. Create a new one, put it in `github.token`, run `/updateplugins reload`. |
 | `Modrinth has only beta versions of ...` | The project publishes no releases for your loader/version (Geyser, for example). Add `version_types: [release, beta]` to that plugin, or leave it to another updater. |
+| `global.auto_update_config: removed in 1.6.0, delete this line ...` (also `auto_discover`, `auto_discover_on_startup`) | The key is gone in 1.6.0. Delete the line; it has no effect. Automatic detection is `global.auto_detect`. |
+| `No source found for X` | The plugin's jar is not on Modrinth and its plugin.yml has no usable `website`. Add an entry for it to config.yml, or hide it with `/updateplugins reject X`. |
+| `Could not read plugins.json ...` | The file was edited by hand or damaged. It was moved to `plugins.json.broken` and detection starts from scratch; earlier decisions have to be made again. |
 
 ## Links
 

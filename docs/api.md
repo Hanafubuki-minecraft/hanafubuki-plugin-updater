@@ -157,7 +157,8 @@ All traffic goes through `http/HttpService`.
   CDNs or other hosts. A redirect from `https` to anything else is refused. Notification POSTs do not follow
   redirects.
 - **Conditional requests.** GET responses with `ETag` or `Last-Modified` are kept in an in-memory LRU cache
-  of 512 entries (`HttpCache.inMemory(512)`). The next request sends `If-None-Match` / `If-Modified-Since`;
+  of at most 512 entries and about 8 MB of response text (`HttpCache.inMemory(512)`); a body longer than a
+  quarter of that budget is not cached. The next request sends `If-None-Match` / `If-Modified-Since`;
   a `304` is answered from the cache. GitHub does not count `304` answers against the rate limit. The cache is
   lost on restart.
 - **Size limits.** API bodies are read up to 32 MB; downloads up to `global.max_download_mb` (checked against
