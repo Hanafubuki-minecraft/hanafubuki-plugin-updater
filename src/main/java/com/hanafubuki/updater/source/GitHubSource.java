@@ -143,7 +143,7 @@ public final class GitHubSource implements UpdateSource {
 
         Optional<JsonObject> release = prereleases ? newestRelease(repo) : latestRelease(repo);
         if (release.isEmpty()) {
-            return Optional.empty();
+            explainMissingRelease(repo);
         }
         JsonObject rel = release.get();
         String tag = Json.str(rel, "tag_name");
@@ -212,9 +212,31 @@ public final class GitHubSource implements UpdateSource {
         return Optional.empty();
     }
 
+    /**
+     * GitHub answers 404 both for "no release" and for "repository not found or private".
+     * Tells the two apart so the admin knows what to fix.
+     */
+    private void explainMissingRelease(String repo) throws IOException {
+        HttpService.Response r = http.get(URI.create(baseUrl + "/repos/" + repo), apiHeaders(), settings.source().apiTimeout());
+        if (r.status() == 404) {
+            boolean hasToken = settings.token() != null && !settings.token().isBlank();
+            throw new IOException("GitHub repository " + repo + " was not found" + (hasToken
+                    ? ". Check the name, and that github.token can read this repository"
+                    : ". If it is private, set github.token to a token that can read it"));
+        }
+        checkStatus(r, repo);
+        throw new IOException("GitHub repository " + repo + " has no published release"
+                + (settings.includePrereleases() ? "" : " (pre-releases are ignored unless include_prereleases: true)")
+                + ". Publish a release with the plugin jar attached");
+    }
+
     private static void checkStatus(HttpService.Response r, String repo) throws IOException {
         if (r.status() == 200) {
             return;
+        }
+        if (r.status() == 401) {
+            throw new IOException("GitHub rejected github.token (HTTP 401 Bad credentials) while checking " + repo
+                    + ". The token is mistyped, expired or revoked; create a new one and run /updateplugins reload");
         }
         if ((r.status() == 403 || r.status() == 429) && r.header("X-RateLimit-Remaining").orElse("").equals("0")) {
             throw new IOException("GitHub API rate limit reached while checking " + repo

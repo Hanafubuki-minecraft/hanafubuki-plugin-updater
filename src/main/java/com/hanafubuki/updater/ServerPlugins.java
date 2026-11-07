@@ -3,7 +3,6 @@ package com.hanafubuki.updater;
 import java.io.File;
 import java.net.URISyntaxException;
 import java.net.URL;
-import java.nio.file.Files;
 import java.nio.file.Path;
 import java.util.ArrayList;
 import java.util.LinkedHashMap;
@@ -18,6 +17,7 @@ import org.bukkit.plugin.Plugin;
 
 import com.hanafubuki.updater.discovery.PluginDiscovery;
 import com.hanafubuki.updater.source.InstalledPlugin;
+import com.hanafubuki.updater.util.PluginJars;
 
 /**
  * Reads the loaded plugins from Bukkit. Must be called on the server main thread; the result is
@@ -64,8 +64,9 @@ public final class ServerPlugins {
             if (location == null) {
                 return Optional.empty();
             }
-            Path path = new File(location.toURI()).toPath();
-            return Files.isRegularFile(path) ? Optional.of(path) : Optional.empty();
+            Path loaded = new File(location.toURI()).toPath();
+            // Paper may run a remapped copy; updates must check and replace the original jar.
+            return PluginJars.original(loaded, plugin.getDataFolder().toPath().getParent());
         } catch (URISyntaxException | SecurityException | NullPointerException | IllegalArgumentException e) {
             return Optional.empty();
         }

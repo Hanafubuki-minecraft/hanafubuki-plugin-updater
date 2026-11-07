@@ -708,6 +708,21 @@ class UpdateManagerTest {
     }
 
     @Test
+    void explainedMissingVersionIsNoVersionNotAFailure() throws IOException {
+        install("Chunky", "1.0");
+        source.answer("Chunky", req -> {
+            throw new com.hanafubuki.updater.source.NoVersionException("Modrinth has only beta versions of chunky");
+        });
+
+        PluginResult r = only(run(settings(CHUNKY)));
+
+        assertEquals(PluginResult.Status.NO_VERSION, r.status());
+        assertEquals("Modrinth has only beta versions of chunky", r.message());
+        assertEquals(0, manager.metrics().snapshot().get("errors_total"));
+        assertEquals(0, state.stats("Chunky").orElseThrow().failures());
+    }
+
+    @Test
     void unexpectedRuntimeExceptionFailsOnlyThatPlugin() throws IOException {
         install("Chunky", "1.0");
         install("Vault", "1.0");
