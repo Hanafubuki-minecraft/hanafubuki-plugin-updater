@@ -61,6 +61,8 @@ public final class UpdaterMenu implements InventoryHolder {
 
     private final PluginUpdater plugin;
     private final Map<Integer, Action> actions = new HashMap<>();
+    /** Player the menu was built for; decides which details are shown. */
+    private Player viewer;
     private Inventory inventory;
 
     private UpdaterMenu(PluginUpdater plugin) {
@@ -87,6 +89,7 @@ public final class UpdaterMenu implements InventoryHolder {
             return;
         }
         UpdaterMenu menu = new UpdaterMenu(plugin);
+        menu.viewer = player;
         List<PluginEntry> entries = new ArrayList<>(plugin.settings().plugins().values());
         int pages = Math.max(1, (entries.size() + PER_PAGE - 1) / PER_PAGE);
         int current = Math.max(0, Math.min(page, pages - 1));
@@ -121,20 +124,23 @@ public final class UpdaterMenu implements InventoryHolder {
         menu.button(48, Material.ANVIL, "<success>Update all", List.of("<muted>Download every available update.",
                         "<muted>They are applied on the next restart."),
                 (p, c) -> menu.startRun(p, new RunOptions(false, null, "gui:" + p.getName()), Permissions.UPDATE));
-        menu.button(49, Material.BOOK, "<primary>Status", menu.statusLore(), (p, c) -> {
-            p.closeInventory();
-            p.performCommand("updateplugins status");
-        });
+        menu.button(49, Material.BOOK, "<primary>Status",
+                player.hasPermission(Permissions.STATUS) ? menu.statusLore() : List.of("<muted>Needs " + Permissions.STATUS), (p, c) -> {
+                    if (menu.allowed(p, Permissions.STATUS)) {
+                        p.closeInventory();
+                        plugin.commands().run(p, "status");
+                    }
+                });
         menu.button(50, Material.BARRIER, "<error>Stop", List.of("<muted>Cancel the running check"), (p, c) -> {
             if (menu.allowed(p, Permissions.STOP)) {
                 p.closeInventory();
-                p.performCommand("updateplugins stop");
+                plugin.commands().run(p, "stop");
             }
         });
         menu.button(51, Material.REPEATER, "<warning>Reload config", List.of("<muted>Re-read config.yml"), (p, c) -> {
             if (menu.allowed(p, Permissions.RELOAD)) {
                 p.closeInventory();
-                p.performCommand("updateplugins reload");
+                plugin.commands().run(p, "reload");
             }
         });
         if (current < pages - 1) {
@@ -188,7 +194,7 @@ public final class UpdaterMenu implements InventoryHolder {
         } else {
             material = Material.GRAY_CONCRETE;
             state = "<muted>" + stats.map(s -> s.lastResult() == null ? "not checked yet"
-                    : "last check: " + s.lastResult().toLowerCase().replace('_', ' ')).orElse("not checked yet");
+                    : "last check: " + escape(s.lastResult().toLowerCase().replace('_', ' '))).orElse("not checked yet");
         }
 
         List<String> lore = new ArrayList<>();
@@ -196,7 +202,7 @@ public final class UpdaterMenu implements InventoryHolder {
         lore.add("<muted>Source: <accent>" + escape(entry.source()));
         lore.add("<muted>From: <accent>" + (plugin.inConfig(entry.name()) ? "config.yml" : "plugins.json (found, confirmed)"));
         lore.add("<muted>Installed: <accent>" + escape(installed == null ? "-" : installed.version()));
-        stats.ifPresent(s -> {
+        stats.filter(s -> viewer.hasPermission(Permissions.STATS)).ifPresent(s -> {
             if (s.lastSeenVersion() != null) {
                 lore.add("<muted>Latest seen: <accent>" + escape(s.lastSeenVersion()));
             }
@@ -262,6 +268,7 @@ public final class UpdaterMenu implements InventoryHolder {
         int pages = Math.max(1, (entries.size() + PER_PAGE - 1) / PER_PAGE);
         int current = Math.max(0, Math.min(page, pages - 1));
         UpdaterMenu menu = new UpdaterMenu(plugin);
+        menu.viewer = player;
         menu.inventory = Bukkit.createInventory(menu, SIZE, plugin.messages().format(
                 "<primary>Found plugins <muted>(<page>/<pages>)", Messages.text("page", current + 1), Messages.text("pages", pages)));
 
@@ -282,7 +289,7 @@ public final class UpdaterMenu implements InventoryHolder {
             menu.button(47, Material.EMERALD_BLOCK, "<success>Confirm all waiting (" + waiting + ")",
                     List.of("<muted>Update every waiting plugin", "<muted>from now on."), (p, c) -> {
                         if (menu.allowed(p, Permissions.CONFIRM)) {
-                            p.performCommand("updateplugins confirm all");
+                            plugin.commands().run(p, "confirm", "all");
                             openFound(plugin, p, current);
                         }
                     });
@@ -291,7 +298,7 @@ public final class UpdaterMenu implements InventoryHolder {
         menu.button(51, Material.SPYGLASS, "<primary>Search now", List.of("<muted>Look for new plugins again"), (p, c) -> {
             if (menu.allowed(p, Permissions.DISCOVER)) {
                 p.closeInventory();
-                p.performCommand("updateplugins discover");
+                plugin.commands().run(p, "discover");
             }
         });
         if (current < pages - 1) {
@@ -349,10 +356,10 @@ public final class UpdaterMenu implements InventoryHolder {
                 return;
             }
             if (click == ClickType.LEFT && canConfirm) {
-                p.performCommand("updateplugins confirm " + name);
+                plugin.commands().confirmOne(p, name);
                 openFound(plugin, p, page);
             } else if (click == ClickType.RIGHT && canReject) {
-                p.performCommand("updateplugins reject " + name);
+                plugin.commands().rejectOne(p, name);
                 openFound(plugin, p, page);
             }
         });
@@ -379,19 +386,26 @@ public final class UpdaterMenu implements InventoryHolder {
             return;
         }
         UpdaterMenu menu = new UpdaterMenu(plugin);
+        menu.viewer = player;
         menu.inventory = Bukkit.createInventory(menu, SIZE, plugin.messages().format("<primary>Backups of <accent><name>",
                 Messages.text("name", pluginName)));
         int slot = 0;
         for (BackupManager.Backup b : backups.subList(0, Math.min(backups.size(), PER_PAGE))) {
-            String version = b.version();
-            menu.button(slot++, Material.CHEST, "<accent>" + escape(version), List.of(
+            menu.button(slot++, Material.CHEST, "<accent>" + escape(b.version()), List.of(
                     "<muted>Saved: <accent>" + TIME.format(b.created()),
                     "<muted>Size: <accent>" + (b.size() / 1024) + " KB",
                     "",
                     "<primary>Click: <muted>restore this version on next restart"), (p, c) -> {
                 if (menu.allowed(p, Permissions.ROLLBACK)) {
                     p.closeInventory();
-                    p.performCommand("updateplugins rollback " + pluginName + " " + version);
+                    Optional<InstalledPlugin> installed = ServerPlugins.snapshot().values().stream()
+                            .filter(x -> x.name().equalsIgnoreCase(pluginName)).findFirst();
+                    if (installed.isEmpty()) {
+                        plugin.messages().send(p, "<error><name> is not installed.", Messages.text("name", pluginName));
+                    } else {
+                        // Exactly the clicked file, even if several backups share a version.
+                        plugin.commands().restore(p, installed.get(), null, b.file());
+                    }
                 }
             });
         }
@@ -404,7 +418,7 @@ public final class UpdaterMenu implements InventoryHolder {
                 "<muted>and resume automatic updates"), (p, c) -> {
             if (menu.allowed(p, Permissions.ROLLBACK)) {
                 p.closeInventory();
-                p.performCommand("updateplugins unstage " + pluginName);
+                plugin.commands().run(p, "unstage", pluginName);
             }
         });
         menu.button(49, Material.ARROW, "<primary>Back", List.of(), (p, c) -> openMain(plugin, p, 0));

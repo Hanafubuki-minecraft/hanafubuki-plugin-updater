@@ -163,7 +163,7 @@ class PluginRegistryTest {
     }
 
     @Test
-    void undecidedEntriesOfRemovedOrConfiguredPluginsAreForgottenButDecisionsKept() throws Exception {
+    void uninstalledOrConfiguredPluginsAreForgottenButRejectionsKept() throws Exception {
         onModrinth.put("A.jar", "a");
         onModrinth.put("B.jar", "b");
         onModrinth.put("C.jar", "c");
@@ -173,10 +173,89 @@ class PluginRegistryTest {
         r.confirm("B", "op", T1);
         r.reject("C", "op", T1);
 
-        // A uninstalled (pending), B and C uninstalled (decided), D moved to config.yml, E still unidentified.
+        // A uninstalled (pending), B uninstalled (confirmed), C uninstalled (rejected), D moved to config.yml,
+        // E still unidentified.
         Changes c = detect(r, List.of(plugin("D", "1", null), plugin("E", "1", null)), Set.of("d"), false, T2);
-        assertEquals(List.of("A", "D"), c.removed());
-        assertEquals(List.of("B", "C", "E"), r.entries().stream().map(PluginRegistry.Entry::name).toList());
+        assertEquals(List.of("A", "B", "D"), c.removed());
+        assertEquals(List.of("C", "E"), r.entries().stream().map(PluginRegistry.Entry::name).toList());
+        assertEquals(Map.of(), r.confirmed());
+
+        // B comes back (maybe a different jar with the same name): it must be reviewed again.
+        c = detect(r, List.of(plugin("B", "2", null), plugin("D", "1", null), plugin("E", "1", null)), Set.of("d"), false, T2);
+        assertEquals(List.of("B"), c.pending());
+        assertEquals(Status.PENDING, r.get("B").orElseThrow().status());
+    }
+
+    @Test
+    void configuredOrExcludedTakesOverConfirmedAndRejectedEntries() throws Exception {
+        onModrinth.put("A.jar", "a");
+        onModrinth.put("B.jar", "b");
+        PluginRegistry r = registry();
+        List<Candidate> installed = List.of(plugin("A", "1", null), plugin("B", "1", null));
+        detect(r, installed, Set.of(), false, T1);
+        r.confirm("A", "op", T1);
+        r.reject("B", "op", T1);
+        Changes c = detect(r, installed, Set.of("a", "b"), false, T2);
+        assertEquals(List.of("A", "B"), c.removed());
+        assertEquals(List.of(), r.entries());
+    }
+
+    @Test
+    void websiteGuessAfterModrinthOutageIsReplacedByTheExactMatchLater() throws Exception {
+        PluginRegistry r = registry();
+        List<Candidate> installed = List.of(plugin("Foo", "1", "https://github.com/a/foo"));
+        failWith = new IOException("Modrinth down");
+        Changes c = detect(r, installed, Set.of(), false, T1);
+        assertEquals(List.of("Foo"), c.pending());
+        PluginRegistry.Entry guessed = r.get("Foo").orElseThrow();
+        assertEquals("github", guessed.source());
+        assertTrue(guessed.retry());
+
+        // Still down: the source found before is kept.
+        lookedUp.clear();
+        c = detect(r, installed, Set.of(), false, T2);
+        assertEquals(List.of("Foo.jar"), lookedUp);
+        assertTrue(c.isEmpty(), c.toString());
+        assertEquals("github", r.get("Foo").orElseThrow().source());
+
+        // Back up: the exact hash match replaces the guess and ops are told again.
+        failWith = null;
+        onModrinth.put("Foo.jar", "foo-id");
+        c = detect(r, installed, Set.of(), false, T2);
+        assertEquals(List.of("Foo"), c.pending());
+        PluginRegistry.Entry exact = r.get("Foo").orElseThrow();
+        assertEquals("modrinth", exact.source());
+        assertEquals(Map.of("project_id", "foo-id"), exact.options());
+        assertFalse(exact.retry());
+        assertEquals(T1, exact.discovered());
+
+        // Nothing to retry any more.
+        lookedUp.clear();
+        detect(r, installed, Set.of(), false, T2);
+        assertEquals(List.of(), lookedUp);
+    }
+
+    @Test
+    void pendingSourceIsNotLostWhenALaterLookupFindsNothing() throws Exception {
+        onModrinth.put("A.jar", "a");
+        PluginRegistry r = registry();
+        detect(r, List.of(plugin("A", "1", null)), Set.of(), false, T1);
+        onModrinth.clear();
+        Changes c = detect(r, List.of(plugin("A", "1", null)), Set.of(), true, T2);
+        assertTrue(c.isEmpty());
+        assertEquals("modrinth", r.get("A").orElseThrow().source());
+        assertEquals(Status.PENDING, r.get("A").orElseThrow().status());
+    }
+
+    @Test
+    void forcedRecheckOfUnchangedPendingIsNotReportedAsNew() throws Exception {
+        onModrinth.put("A.jar", "a");
+        PluginRegistry r = registry();
+        detect(r, List.of(plugin("A", "1", null)), Set.of(), false, T1);
+        lookedUp.clear();
+        Changes c = detect(r, List.of(plugin("A", "1", null)), Set.of(), true, T2);
+        assertEquals(List.of("A.jar"), lookedUp);
+        assertTrue(c.isEmpty(), c.toString());
     }
 
     @Test
@@ -305,6 +384,29 @@ class PluginRegistryTest {
         assertEquals(Status.REJECTED, r.get("Rejected").orElseThrow().status());
         assertEquals(Map.of("Good", new PluginEntry("Good", "modrinth", Map.of("project_id", "g"))), r.confirmed());
         assertEquals(Outcome.NO_SOURCE, r.confirm("BadSource", "op", T1));
+    }
+
+    @Test
+    void oneBadEntryDoesNotLoseTheOtherDecisions() throws Exception {
+        Files.writeString(dir.resolve("plugins.json"), """
+                {
+                  "plugins": {
+                    "Good": {"status": "confirmed", "source": "github",
+                             "options": {"repo": "a/b", "asset_pattern": ["x", "y"], "resource_id": 12345}},
+                    "Weird": "not an object",
+                    "Other": {"status": "rejected", "source": "modrinth", "options": {"project_id": "o"}, "retry": "yes"}
+                  },
+                  "extra": [1, 2, 3]
+                }
+                """, StandardCharsets.UTF_8);
+        PluginRegistry r = registry();
+        assertFalse(Files.exists(dir.resolve("plugins.json.broken")));
+        PluginRegistry.Entry good = r.get("Good").orElseThrow();
+        assertEquals(Status.CONFIRMED, good.status());
+        assertEquals(Map.of("repo", "a/b", "resource_id", "12345"), good.options(), "non-scalar option values are dropped");
+        assertTrue(r.get("Weird").isEmpty());
+        assertEquals(Status.REJECTED, r.get("Other").orElseThrow().status());
+        assertFalse(r.get("Other").orElseThrow().retry());
     }
 
     @Test

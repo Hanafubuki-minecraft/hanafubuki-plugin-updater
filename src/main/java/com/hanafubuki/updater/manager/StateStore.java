@@ -286,13 +286,26 @@ public final class StateStore {
     }
 
     private static PluginStats toStats(String name, PluginState s) {
+        // Called for every menu item on the main thread: parse only the first and last valid entries.
         Duration average = null;
-        List<Instant> history = s.update_history.stream().map(StateStore::parse).filter(java.util.Objects::nonNull).toList();
-        if (history.size() >= 2) {
-            Duration total = Duration.between(history.get(0), history.get(history.size() - 1));
-            average = total.dividedBy(history.size() - 1);
+        Instant first = null;
+        Instant lastUpdate = null;
+        int firstIndex = -1;
+        int lastIndex = -1;
+        for (int i = 0; i < s.update_history.size() && first == null; i++) {
+            first = parse(s.update_history.get(i));
+            firstIndex = i;
         }
-        Instant lastUpdate = history.isEmpty() ? null : history.get(history.size() - 1);
+        for (int i = s.update_history.size() - 1; i > firstIndex && lastUpdate == null; i--) {
+            lastUpdate = parse(s.update_history.get(i));
+            lastIndex = i;
+        }
+        if (first != null && lastUpdate != null) {
+            // Entries are written by this class, so everything in between counts as an update.
+            average = Duration.between(first, lastUpdate).dividedBy(lastIndex - firstIndex);
+        } else {
+            lastUpdate = first;
+        }
         return new PluginStats(name, s.checks, s.updates, s.failures, parse(s.last_check), lastUpdate, average,
                 s.last_seen_version, s.staged_version, s.last_result);
     }

@@ -49,8 +49,8 @@ public final class PluginDiscovery {
      * @param source  source id, or null if nothing reliable was found
      * @param options entry options (project_id, repo, ...)
      * @param reason  how it was found, or why not
-     * @param lookupFailed true if nothing was found because a lookup failed (network error),
-     *                     so a later detection should try again
+     * @param lookupFailed true if the Modrinth lookup failed (network error), so the result may be
+     *                     incomplete and a later detection should try again
      */
     public record Suggestion(String name, String version, String source, Map<String, Object> options, String reason,
                              boolean lookupFailed) {
@@ -77,17 +77,29 @@ public final class PluginDiscovery {
         this.modrinth = modrinth;
     }
 
+    /**
+     * Suggests entries for all candidates. After the first failed Modrinth lookup the remaining
+     * candidates are not sent to Modrinth (it is most likely down); they fall back to their website
+     * and are marked {@link Suggestion#lookupFailed()} so a later detection tries again.
+     */
     public List<Suggestion> discover(List<Candidate> candidates) throws InterruptedIOException {
         List<Suggestion> out = new ArrayList<>();
+        boolean modrinthDown = false;
         for (Candidate c : candidates) {
-            out.add(suggest(c));
+            Suggestion s = suggest(c, modrinthDown);
+            modrinthDown |= s.lookupFailed();
+            out.add(s);
         }
         return out;
     }
 
     public Suggestion suggest(Candidate c) throws InterruptedIOException {
-        String lookupError = null;
-        if (modrinth != null && c.jar() != null) {
+        return suggest(c, false);
+    }
+
+    private Suggestion suggest(Candidate c, boolean skipModrinth) throws InterruptedIOException {
+        String lookupError = skipModrinth ? "skipped after an earlier Modrinth error" : null;
+        if (!skipModrinth && modrinth != null && c.jar() != null) {
             try {
                 Optional<String> projectId = modrinth.projectIdOf(c.jar());
                 if (projectId.isPresent()) {
@@ -101,8 +113,13 @@ public final class PluginDiscovery {
             }
         }
         Suggestion fromWebsite = fromWebsite(c.name(), c.version(), c.website());
-        if (fromWebsite.isUsable() || lookupError == null) {
+        if (lookupError == null) {
             return fromWebsite;
+        }
+        if (fromWebsite.isUsable()) {
+            // Usable, but an exact Modrinth match may exist: look again next time.
+            return new Suggestion(c.name(), c.version(), fromWebsite.source(), fromWebsite.options(),
+                    fromWebsite.reason() + " (Modrinth lookup failed: " + lookupError + ")", true);
         }
         return new Suggestion(c.name(), c.version(), null, Map.of(), "Modrinth lookup failed: " + lookupError, true);
     }

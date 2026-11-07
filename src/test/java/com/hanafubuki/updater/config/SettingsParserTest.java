@@ -663,4 +663,26 @@ class SettingsParserTest {
         assertEquals(s.general(), merged.general());
         assertEquals(s.schedule(), merged.schedule());
     }
+
+    @Test
+    void invalidConfigEntriesStillOverrideDetectedOnes() {
+        SettingsParser.Result r = parse("""
+                plugins:
+                  Foo:
+                    source: modrith
+                    project_id: foo
+                  Bar: "oops"
+                """);
+        assertEquals(2, r.problems().size(), r.problems().toString());
+        UpdaterSettings s = r.settings();
+        assertEquals(List.of(), s.pluginNames());
+        assertTrue(s.inConfig("foo"));
+        assertTrue(s.inConfig("BAR"));
+        assertFalse(s.inConfig("Baz"));
+        UpdaterSettings merged = s.withDetected(Map.of(
+                "foo", new PluginEntry("foo", "github", Map.of("repo", "a/foo")),
+                "Baz", new PluginEntry("Baz", "modrinth", Map.of("project_id", "baz"))));
+        assertEquals(List.of("Baz"), merged.pluginNames(), "a broken config entry blocks the detected one");
+        assertTrue(merged.inConfig("Foo"));
+    }
 }

@@ -112,7 +112,9 @@ public final class ModrinthSource implements UpdateSource {
         List<String> versionTypes = orDefault(request.entry().list("version_types"), settings.versionTypes());
 
         URI uri = URI.create(baseUrl + "/project/" + encode(projectId) + "/version?loaders=" + encode(jsonArray(loaders))
-                + "&game_versions=" + encode(jsonArray(gameVersions)));
+                + "&game_versions=" + encode(jsonArray(gameVersions))
+                // The changelog is never used; leaving it out makes the answer (and the cache) much smaller.
+                + "&include_changelog=false");
         JsonArray versions = Json.parseArray(http.getOk(uri, Map.of("Accept", "application/json"), settings.source().apiTimeout()),
                 "Modrinth versions of " + projectId);
 

@@ -30,9 +30,12 @@ public final class MenuListener implements Listener {
         if (event.getClickedInventory() != event.getView().getTopInventory()) {
             return;
         }
-        if (event.getWhoClicked() instanceof Player player) {
+        org.bukkit.event.inventory.ClickType click = event.getClick();
+        // Only plain mouse clicks act; Q, number keys, F, middle and double clicks do nothing.
+        boolean mouse = click == org.bukkit.event.inventory.ClickType.LEFT || click == org.bukkit.event.inventory.ClickType.RIGHT
+                || click == org.bukkit.event.inventory.ClickType.SHIFT_LEFT || click == org.bukkit.event.inventory.ClickType.SHIFT_RIGHT;
+        if (mouse && event.getWhoClicked() instanceof Player player) {
             int slot = event.getRawSlot();
-            org.bukkit.event.inventory.ClickType click = event.getClick();
             // Bukkit forbids opening or closing inventories inside the click event; act on the next tick.
             Bukkit.getScheduler().runTask(plugin, () -> {
                 if (player.isOnline() && player.getOpenInventory().getTopInventory().getHolder(false) == menu) {

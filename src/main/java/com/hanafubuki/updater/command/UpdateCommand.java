@@ -76,6 +76,11 @@ public final class UpdateCommand implements TabExecutor {
         return plugin.messages();
     }
 
+    /** Runs a sub-command as if typed, with all permission checks (used by the menu). */
+    public void run(CommandSender sender, String... args) {
+        onCommand(sender, null, "updateplugins", args);
+    }
+
     @Override
     public boolean onCommand(CommandSender sender, Command command, String label, String[] args) {
         if (!sender.hasPermission(Permissions.USE)) {
@@ -307,22 +312,38 @@ public final class UpdateCommand implements TabExecutor {
             m().send(sender, "<warning>Wait until the running check has finished (or /updateplugins stop).");
             return true;
         }
-        String version = args.length > 1 ? args[1] : null;
+        // Versions from plugin.yml may contain spaces, e.g. "2.0.0 (b123)".
+        String version = args.length > 1 ? String.join(" ", Arrays.copyOfRange(args, 1, args.length)) : null;
+        restore(sender, installed.get(), version, null);
+        return true;
+    }
+
+    /**
+     * Stages a backup in the background: {@code backupFile} if given (the menu passes the clicked
+     * backup), otherwise the newest backup of {@code version} (or the newest of all if null).
+     */
+    public void restore(CommandSender sender, InstalledPlugin installed, String version, Path backupFile) {
         Path updateFolder = plugin.updateFolder();
         plugin.runBackground(() -> {
+            if (plugin.manager().isRunning()) {
+                // A run may have started since the command was typed; it could stage over the rollback.
+                plugin.runSync(() -> m().send(sender, "<warning>Wait until the running check has finished (or /updateplugins stop)."));
+                return;
+            }
             try {
-                BackupManager.Backup b = plugin.backups().restore(version, installed.get(), updateFolder);
-                plugin.state().hold(installed.get().name(), b.version(), Instant.now());
+                BackupManager.Backup b = backupFile != null
+                        ? plugin.backups().restoreFile(backupFile, installed, updateFolder)
+                        : plugin.backups().restore(version, installed, updateFolder);
+                plugin.state().hold(installed.name(), b.version(), Instant.now());
                 plugin.runSync(() -> m().send(sender, "<success><name> <version> is staged and replaces <current> on the next restart. "
                                 + "Automatic updates of this plugin are paused; resume with <accent>/updateplugins unstage <name></accent> "
                                 + "after the restart.",
-                        Messages.text("name", installed.get().name()), Messages.text("version", b.version()),
-                        Messages.text("current", installed.get().version())));
+                        Messages.text("name", installed.name()), Messages.text("version", b.version()),
+                        Messages.text("current", installed.version())));
             } catch (IOException e) {
                 plugin.runSync(() -> m().send(sender, "<error>Rollback failed: <e>", Messages.text("e", e.getMessage())));
             }
         });
-        return true;
     }
 
     private boolean unstage(CommandSender sender, String[] args) {
@@ -341,6 +362,10 @@ public final class UpdateCommand implements TabExecutor {
         }
         Path staged = Installer.stagedPath(installed.get(), plugin.updateFolder());
         plugin.runBackground(() -> {
+            if (plugin.manager().isRunning()) {
+                plugin.runSync(() -> m().send(sender, "<warning>Wait until the running check has finished (or /updateplugins stop)."));
+                return;
+            }
             try {
                 boolean deleted = Files.deleteIfExists(staged);
                 plugin.state().clearStaged(installed.get().name());
@@ -453,7 +478,7 @@ public final class UpdateCommand implements TabExecutor {
             return true;
         }
         String name = String.join(" ", args);
-        if (name.equalsIgnoreCase("all")) {
+        if (name.equalsIgnoreCase("all") && plugin.registry().get(name).isEmpty()) {
             List<String> done = plugin.registry().confirmAllPending(by(sender), Instant.now());
             if (done.isEmpty()) {
                 m().send(sender, "<muted>Nothing waits for confirmation.");
@@ -464,6 +489,12 @@ public final class UpdateCommand implements TabExecutor {
             }
             return true;
         }
+        confirmOne(sender, name);
+        return true;
+    }
+
+    /** Confirms one found plugin by name (the menu uses this, so a plugin named "all" works too). */
+    public void confirmOne(CommandSender sender, String name) {
         PluginRegistry.Outcome outcome = plugin.registry().confirm(name, by(sender), Instant.now());
         String display = plugin.registry().get(name).map(PluginRegistry.Entry::name).orElse(name);
         switch (outcome) {
@@ -491,7 +522,6 @@ public final class UpdateCommand implements TabExecutor {
                 }
             }
         }
-        return true;
     }
 
     private void includeOnlyHint(CommandSender sender, String name) {
@@ -509,7 +539,12 @@ public final class UpdateCommand implements TabExecutor {
             m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins reject <plugin>"));
             return true;
         }
-        String name = String.join(" ", args);
+        rejectOne(sender, String.join(" ", args));
+        return true;
+    }
+
+    /** Rejects one found plugin by name. */
+    public void rejectOne(CommandSender sender, String name) {
         PluginRegistry.Outcome outcome = plugin.registry().reject(name, by(sender), Instant.now());
         String display = plugin.registry().get(name).map(PluginRegistry.Entry::name).orElse(name);
         switch (outcome) {
@@ -527,7 +562,6 @@ public final class UpdateCommand implements TabExecutor {
                             : "<error><name> was not found automatically. See <accent>/updateplugins pending</accent>.",
                     Messages.text("name", name));
         }
-        return true;
     }
 
     private boolean metrics(CommandSender sender, String[] args) {
@@ -617,6 +651,14 @@ public final class UpdateCommand implements TabExecutor {
             return filter(subs.stream(), args[0]);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        Optional<Sub> found = SUBS.stream().filter(x -> x.name().equals(sub)).findFirst();
+        boolean allowed = found.isPresent() && (sub.equals("update")
+                ? sender.hasPermission(Permissions.UPDATE) || sender.hasPermission(Permissions.CHECK)
+                : sender.hasPermission(found.get().permission()));
+        if (!allowed) {
+            // Plugin names are only shown to those who may use the sub-command.
+            return List.of();
+        }
         String last = args[args.length - 1];
         Stream<String> configured = plugin.settings().plugins().keySet().stream();
         return switch (sub) {

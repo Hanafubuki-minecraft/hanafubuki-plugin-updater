@@ -142,6 +142,24 @@ public final class BackupManager {
                     ? "No backups exist for " + installed.name()
                     : "No backup of " + installed.name() + " version " + version);
         }
+        return stage(chosen, installed, updateFolder);
+    }
+
+    /**
+     * Stages one specific backup (e.g. the one clicked in the menu) for installation on next restart.
+     * The file must be one of this plugin's backups.
+     */
+    public synchronized Backup restoreFile(Path backupFile, InstalledPlugin installed, Path updateFolder) throws IOException {
+        Path wanted = backupFile.toAbsolutePath().normalize();
+        for (Backup b : list(installed.name())) {
+            if (b.file().toAbsolutePath().normalize().equals(wanted)) {
+                return stage(b, installed, updateFolder);
+            }
+        }
+        throw new IOException("No backup " + backupFile.getFileName() + " of " + installed.name());
+    }
+
+    private Backup stage(Backup chosen, InstalledPlugin installed, Path updateFolder) throws IOException {
         Optional<PluginDescriptor> d = PluginDescriptor.read(chosen.file());
         if (d.isEmpty() || !d.get().name().equalsIgnoreCase(installed.name())) {
             throw new IOException("Backup " + chosen.file().getFileName() + " is not a valid " + installed.name() + " jar");

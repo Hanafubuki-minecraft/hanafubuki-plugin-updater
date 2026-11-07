@@ -30,7 +30,22 @@ public record UpdaterSettings(
         Style style,
         boolean consoleJson,
         Health health,
-        Map<String, PluginEntry> plugins) {
+        Map<String, PluginEntry> plugins,
+        Set<String> configuredNames) {
+
+    /**
+     * @param plugins         valid entries of the {@code plugins:} section (plus confirmed plugins.json
+     *                        entries after {@link #withDetected})
+     * @param configuredNames every name under {@code plugins:} in config.yml, also entries with errors,
+     *                        case-insensitive; these always win over plugins.json
+     */
+    public UpdaterSettings {
+    }
+
+    /** True if config.yml has an entry with this name, valid or not (case-insensitive). */
+    public boolean inConfig(String name) {
+        return configuredNames.contains(name);
+    }
 
     /**
      * @param minVersion        installed versions below this are not updated (null = no limit)
@@ -152,17 +167,18 @@ public record UpdaterSettings(
         if (detected == null || detected.isEmpty()) {
             return this;
         }
-        java.util.TreeSet<String> configured = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        configured.addAll(plugins.keySet());
+        java.util.TreeSet<String> taken = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        taken.addAll(plugins.keySet());
+        taken.addAll(configuredNames);
         Map<String, PluginEntry> merged = new java.util.LinkedHashMap<>(plugins);
         detected.forEach((name, entry) -> {
-            if (configured.add(name)) {
+            if (taken.add(name)) {
                 merged.put(name, entry);
             }
         });
         return new UpdaterSettings(general, modes, schedule, modrinth, github, githubAdvisories, hangar, spigotmc,
                 custom, backups, dependencies, notifications, style, consoleJson, health,
-                java.util.Collections.unmodifiableMap(merged));
+                java.util.Collections.unmodifiableMap(merged), configuredNames);
     }
 
     /** Plugin names in config order. */

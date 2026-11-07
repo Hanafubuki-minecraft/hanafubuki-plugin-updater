@@ -22,7 +22,9 @@ import java.util.logging.Logger;
 
 import com.google.gson.Gson;
 import com.google.gson.GsonBuilder;
-import com.google.gson.JsonParseException;
+import com.google.gson.JsonElement;
+import com.google.gson.JsonObject;
+import com.google.gson.JsonParser;
 import com.hanafubuki.updater.config.PluginEntry;
 import com.hanafubuki.updater.config.SettingsParser;
 import com.hanafubuki.updater.util.AtomicFiles;
@@ -88,7 +90,8 @@ public final class PluginRegistry {
      *
      * @param pending      plugins that now wait for confirmation (new, or identified on a retry)
      * @param unidentified new plugins without a source
-     * @param removed      undecided plugins that were uninstalled or are now in config.yml
+     * @param removed      entries dropped because the plugin is now in config.yml or modes.exclude_list,
+     *                     or was uninstalled (rejected entries are kept)
      */
     public record Changes(List<String> pending, List<String> unidentified, List<String> removed) {
         public boolean isEmpty() {
@@ -146,10 +149,18 @@ public final class PluginRegistry {
         if (!Files.isRegularFile(file)) {
             return;
         }
-        Data data;
+        JsonObject plugins;
         try {
-            data = gson.fromJson(Files.readString(file, StandardCharsets.UTF_8), Data.class);
-        } catch (IOException | JsonParseException e) {
+            JsonElement root = JsonParser.parseString(Files.readString(file, StandardCharsets.UTF_8));
+            if (root == null || root.isJsonNull()) {
+                return;
+            }
+            JsonElement p = root.getAsJsonObject().get("plugins");
+            if (p == null || p.isJsonNull()) {
+                return;
+            }
+            plugins = p.getAsJsonObject();
+        } catch (IOException | RuntimeException e) {
             warn("Could not read " + file.getFileName() + " (" + e.getMessage() + "); starting empty, "
                     + "the old file is kept as " + file.getFileName() + ".broken");
             try {
@@ -159,18 +170,54 @@ public final class PluginRegistry {
             }
             return;
         }
-        if (data == null || data.plugins == null) {
-            return;
+        // One bad entry (e.g. a hand edit) only loses that entry, never the other decisions.
+        for (Map.Entry<String, JsonElement> e : plugins.entrySet()) {
+            String name = e.getKey() == null ? "" : e.getKey().trim();
+            if (name.isEmpty() || e.getValue() == null || !e.getValue().isJsonObject()) {
+                continue;
+            }
+            Stored stored;
+            try {
+                stored = storedOf(e.getValue().getAsJsonObject());
+            } catch (RuntimeException ex) {
+                warn(file.getFileName() + ": ignoring the entry " + name + " (" + ex.getMessage() + ")");
+                continue;
+            }
+            Entry entry = fromStored(name, stored);
+            if (entry != null) {
+                entries.put(entry.name(), entry);
+            }
         }
-        data.plugins.forEach((name, s) -> {
-            if (name == null || name.isBlank() || s == null) {
-                return;
+    }
+
+    /** Reads one entry leniently: scalars are taken as text, anything else is ignored. */
+    private static Stored storedOf(JsonObject o) {
+        Stored s = new Stored();
+        s.status = text(o.get("status"));
+        s.source = text(o.get("source"));
+        s.reason = text(o.get("reason"));
+        s.version = text(o.get("version"));
+        s.discovered_at = text(o.get("discovered_at"));
+        s.decided_at = text(o.get("decided_at"));
+        s.decided_by = text(o.get("decided_by"));
+        s.retry = "true".equalsIgnoreCase(text(o.get("retry")));
+        if (o.get("options") != null && o.get("options").isJsonObject()) {
+            s.options = new LinkedHashMap<>();
+            for (Map.Entry<String, JsonElement> opt : o.getAsJsonObject("options").entrySet()) {
+                String v = text(opt.getValue());
+                if (v != null) {
+                    s.options.put(opt.getKey(), v);
+                }
             }
-            Entry e = fromStored(name.trim(), s);
-            if (e != null) {
-                entries.put(e.name(), e);
-            }
-        });
+        }
+        return s;
+    }
+
+    private static String text(JsonElement e) {
+        if (e == null || e.isJsonNull() || !e.isJsonPrimitive()) {
+            return null;
+        }
+        return e.getAsString();
     }
 
     private Entry fromStored(String name, Stored s) {
@@ -259,12 +306,18 @@ public final class PluginRegistry {
             } else if (e.status() == Status.UNIDENTIFIED
                     && (force || e.retry() || !Objects.equals(e.version(), c.version()))) {
                 out.add(c);
+            } else if (e.status() == Status.PENDING && (force || e.retry())) {
+                // Still undecided: a retry may find the exact Modrinth match instead of a website guess.
+                out.add(c);
             }
         }
         return out;
     }
 
-    /** Stores lookup results and forgets undecided plugins that are gone or now configured. */
+    /**
+     * Stores lookup results. Forgets entries that config.yml or modes.exclude_list now cover, and
+     * non-rejected entries of plugins that are no longer installed.
+     */
     public synchronized Changes apply(List<PluginDiscovery.Candidate> installed, Collection<String> skip,
                                       List<PluginDiscovery.Suggestion> suggestions, Instant now) {
         Set<String> skipped = caseInsensitive(skip);
@@ -278,8 +331,17 @@ public final class PluginRegistry {
                 continue;
             }
             Entry old = entries.get(s.name());
-            if (old != null && old.status() != Status.UNIDENTIFIED) {
-                // Decided (or identified) meanwhile; keep the decision.
+            if (old != null && old.status() != Status.UNIDENTIFIED && old.status() != Status.PENDING) {
+                // Decided meanwhile (or before a forced re-check); keep the decision.
+                continue;
+            }
+            if (old != null && old.status() == Status.PENDING && !s.isUsable()) {
+                // Never lose a source that was found before; just remember to look again if the lookup failed.
+                if (s.lookupFailed() && !old.retry()) {
+                    entries.put(old.name(), new Entry(old.name(), old.status(), old.source(), old.options(), old.reason(),
+                            old.version(), old.discovered(), old.decided(), old.decidedBy(), true));
+                    changed = true;
+                }
                 continue;
             }
             Map<String, String> options = new LinkedHashMap<>();
@@ -291,13 +353,15 @@ public final class PluginRegistry {
             Instant discovered = old == null ? now : old.discovered();
             Status status = s.isUsable() ? Status.PENDING : Status.UNIDENTIFIED;
             Entry fresh = new Entry(s.name(), status, s.source(), options, s.reason(), s.version(), discovered,
-                    null, null, !s.isUsable() && s.lookupFailed());
+                    null, null, s.lookupFailed());
             if (fresh.equals(old)) {
                 continue;
             }
             entries.put(fresh.name(), fresh);
             changed = true;
-            if (status == Status.PENDING) {
+            boolean newSource = old == null || old.status() == Status.UNIDENTIFIED
+                    || !Objects.equals(old.source(), fresh.source()) || !old.options().equals(fresh.options());
+            if (status == Status.PENDING && newSource) {
                 pending.add(fresh.name());
             } else if (old == null) {
                 unidentified.add(fresh.name());
@@ -308,8 +372,10 @@ public final class PluginRegistry {
         var it = entries.values().iterator();
         while (it.hasNext()) {
             Entry e = it.next();
-            boolean undecided = e.status() == Status.PENDING || e.status() == Status.UNIDENTIFIED;
-            if (undecided && (!present.contains(e.name()) || skipped.contains(e.name()))) {
+            // config.yml / exclude_list take over completely. A confirmation is tied to the installed plugin:
+            // after an uninstall a jar with the same name must be reviewed again. Rejections are kept.
+            boolean gone = !present.contains(e.name()) && e.status() != Status.REJECTED;
+            if (skipped.contains(e.name()) || gone) {
                 it.remove();
                 removed.add(e.name());
                 changed = true;

@@ -9,8 +9,8 @@ import java.util.LinkedHashMap;
 /**
  * Stores the last successful response of a GET request together with its validators
  * (ETag / Last-Modified). On the next request the validators are sent and a
- * "304 Not Modified" answer is served from here. GitHub does not count 304 answers
- * against the API rate limit.
+ * "304 Not Modified" answer is served from here. This saves traffic and parsing; GitHub only
+ * leaves 304 answers out of the rate limit for requests with a token (github.token).
  */
 public interface HttpCache {
 
@@ -22,8 +22,11 @@ public interface HttpCache {
 
     void put(URI uri, Entry entry);
 
-    /** Default memory budget of {@link #inMemory(int)}: about 8 MB of response text. */
-    long DEFAULT_MAX_CHARS = 8L * 1024 * 1024;
+    /**
+     * Default budget of {@link #inMemory(int)}: 4M characters, i.e. 4-8 MB of heap (a body with
+     * characters outside Latin-1 takes two bytes per character).
+     */
+    long DEFAULT_MAX_CHARS = 4L * 1024 * 1024;
 
     /** In-memory cache of the {@code maxEntries} most recently used responses, within {@link #DEFAULT_MAX_CHARS}. */
     static HttpCache inMemory(int maxEntries) {

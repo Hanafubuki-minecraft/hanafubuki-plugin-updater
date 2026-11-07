@@ -68,10 +68,15 @@ public final class PluginUpdater extends JavaPlugin {
     private HealthServer health;
     private UpdateScheduler scheduler;
     private ExecutorService background;
+    /** Plugin detection has its own thread so slow lookups never delay backups, rollback or unstage. */
+    private ExecutorService detector;
+    private UpdateCommand command;
     private ResultReporter reporter;
     private PluginRegistry registry;
     private volatile UpdateReport lastReport;
     private final AtomicBoolean detecting = new AtomicBoolean();
+    /** A detection was asked for while one was running; run once more afterwards (config may have changed). */
+    private final AtomicBoolean detectAgain = new AtomicBoolean();
     /** config.yml settings merged with confirmed plugins.json entries, rebuilt when either changes. */
     private final Object effectiveLock = new Object();
     private UpdaterSettings effective;
@@ -85,6 +90,9 @@ public final class PluginUpdater extends JavaPlugin {
         messages = new Messages(config.settings().style());
 
         background = com.hanafubuki.updater.util.Threads.lazySingle("HanafubukiUpdater-background", 30);
+        detector = com.hanafubuki.updater.util.Threads.lazySingle("HanafubukiUpdater-detect", 30);
+        detecting.set(false);
+        detectAgain.set(false);
         http = new HttpService(HttpService.newClient(Duration.ofSeconds(10)),
                 "ByteMe6/hanafubuki-plugin-updater/" + getPluginMeta().getVersion(),
                 RetryPolicy.DEFAULT, Thread::sleep, HttpCache.inMemory(512), getLogger());
@@ -102,9 +110,9 @@ public final class PluginUpdater extends JavaPlugin {
             getServer().getPluginManager().disablePlugin(this);
             return;
         }
-        UpdateCommand executor = new UpdateCommand(this);
-        command.setExecutor(executor);
-        command.setTabCompleter(executor);
+        this.command = new UpdateCommand(this);
+        command.setExecutor(this.command);
+        command.setTabCompleter(this.command);
         getServer().getPluginManager().registerEvents(new MenuListener(this), this);
         getServer().getPluginManager().registerEvents(new JoinListener(this), this);
 
@@ -131,6 +139,12 @@ public final class PluginUpdater extends JavaPlugin {
         stopHealthServer();
         if (notifications != null) {
             notifications.shutdown();
+        }
+        if (detector != null) {
+            detector.shutdownNow();
+        }
+        if (http != null) {
+            http.shutdown();
         }
         if (background != null) {
             background.shutdownNow();
@@ -330,34 +344,45 @@ public final class PluginUpdater extends JavaPlugin {
      */
     public boolean detect(CommandSender requester, boolean force) {
         if (!detecting.compareAndSet(false, true)) {
+            detectAgain.set(true);
             return false;
         }
         UpdaterSettings s = config.settings();
         List<PluginDiscovery.Candidate> installed = ServerPlugins.candidates(getName());
         java.util.Set<String> skip = new java.util.TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        skip.addAll(s.plugins().keySet());
+        skip.addAll(s.configuredNames());
         skip.addAll(s.modes().excludeList());
         ModrinthSource lookup = modrinth;
         try {
-            background.execute(() -> {
-                PluginRegistry.Changes changes;
+            detector.execute(() -> {
+                PluginRegistry.Changes changes = null;
+                Throwable failure = null;
                 try {
                     changes = registry.detect(installed, skip, force, new PluginDiscovery(lookup::projectIdOf),
                             java.time.Instant.now());
-                } catch (IOException | RuntimeException e) {
+                } catch (Throwable t) {
+                    failure = t;
+                } finally {
                     detecting.set(false);
-                    if (!(e instanceof java.io.InterruptedIOException)) {
-                        getLogger().warning("Plugin detection failed: " + e.getMessage());
-                    }
-                    runSync(() -> {
-                        if (requester != null) {
-                            messages.send(requester, "<error>Plugin detection failed: <e>", Messages.text("e", e.getMessage()));
-                        }
-                    });
-                    return;
                 }
-                detecting.set(false);
-                runSync(() -> reporter.onDetection(changes, registry, requester));
+                PluginRegistry.Changes done = changes;
+                Throwable error = failure;
+                if (error != null && !(error instanceof java.io.InterruptedIOException)) {
+                    getLogger().warning("Plugin detection failed: " + error);
+                }
+                runSync(() -> {
+                    if (done != null) {
+                        reporter.onDetection(done, registry, requester);
+                    } else if (requester != null) {
+                        messages.send(requester, "<error>Plugin detection failed: <e>", Messages.text("e", String.valueOf(error)));
+                    }
+                    if (detectAgain.getAndSet(false) && config.settings().general().autoDetect()) {
+                        detect(null, false);
+                    }
+                });
+                if (error instanceof Error e) {
+                    throw e;
+                }
             });
         } catch (java.util.concurrent.RejectedExecutionException e) {
             detecting.set(false);
@@ -405,9 +430,13 @@ public final class PluginUpdater extends JavaPlugin {
         return config.settings();
     }
 
-    /** True if config.yml has an entry for this plugin (case-insensitive). */
+    /** True if config.yml has an entry for this plugin, valid or not (case-insensitive). */
     public boolean inConfig(String plugin) {
-        return config.settings().plugins().keySet().stream().anyMatch(n -> n.equalsIgnoreCase(plugin));
+        return config.settings().inConfig(plugin);
+    }
+
+    public UpdateCommand commands() {
+        return command;
     }
 
     public PluginRegistry registry() {

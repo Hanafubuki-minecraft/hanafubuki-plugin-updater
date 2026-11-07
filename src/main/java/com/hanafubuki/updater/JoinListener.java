@@ -14,8 +14,9 @@ import com.hanafubuki.updater.manager.PluginResult;
 import com.hanafubuki.updater.source.GitHubAdvisories;
 
 /**
- * Reminds players with {@code hanafubuki.updater.notify} about found plugins that wait for
- * confirmation, updates that wait for a restart and open security advisories from the last run.
+ * On join, reminds players with {@code hanafubuki.updater.confirm} about found plugins that wait for
+ * confirmation, and players with {@code hanafubuki.updater.notify} about updates that wait for a
+ * restart and open security advisories from the last run.
  */
 final class JoinListener implements Listener {
 
@@ -28,15 +29,19 @@ final class JoinListener implements Listener {
     @EventHandler(priority = EventPriority.MONITOR)
     public void onJoin(PlayerJoinEvent event) {
         Player player = event.getPlayer();
-        if (!plugin.settings().notifications().onJoin() || !player.hasPermission(Permissions.NOTIFY)) {
+        if (!plugin.settings().notifications().onJoin()) {
             return;
         }
         Messages m = plugin.messages();
         List<String> pending = plugin.registry().pendingNames();
-        if (!pending.isEmpty()) {
+        // Found plugins go to those who can decide about them.
+        if (!pending.isEmpty() && player.hasPermission(Permissions.CONFIRM)) {
             m.send(player, "<warning><count> new plugin(s) found, waiting for confirmation: <accent><list></accent> "
                             + "<click:run_command:'/updateplugins pending'><primary>[review]</primary></click>",
                     Messages.text("count", pending.size()), Messages.text("list", String.join(", ", pending)));
+        }
+        if (!player.hasPermission(Permissions.NOTIFY)) {
+            return;
         }
         Map<String, String> staged = plugin.state().allStaged();
         if (!staged.isEmpty()) {

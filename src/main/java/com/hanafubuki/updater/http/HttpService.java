@@ -105,6 +105,15 @@ public final class HttpService {
         return new HttpService(client, userAgent, policy, sleeper, cache, logger);
     }
 
+    /**
+     * Closes the shared client: aborts open requests and releases its selector thread and pooled
+     * connections. Called when the plugin is disabled. Every copy made by {@link #withRetry}
+     * shares the client, so all of them stop working.
+     */
+    public void shutdown() {
+        client.shutdownNow();
+    }
+
     public String userAgent() {
         return userAgent;
     }

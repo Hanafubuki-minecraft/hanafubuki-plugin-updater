@@ -105,7 +105,7 @@ public final class SettingsParser {
         return new UpdaterSettings(general, modes, schedule(), modrinth, github, bool("github.advisories", true), hangar,
                 source("spigotmc"), source("custom"),
                 new UpdaterSettings.Backups(bool("backups.enabled", true), integer("backups.keep", 3, 1, 100)),
-                dependencyMode(), notifications(), style(), bool("console.json_format", false), health(), plugins());
+                dependencyMode(), notifications(), style(), bool("console.json_format", false), health(), plugins(), pluginKeys());
     }
 
     // --- sections -------------------------------------------------------------------------
@@ -268,6 +268,20 @@ public final class SettingsParser {
         boolean enabled = bool("health_check.enabled", false);
         return new UpdaterSettings.Health(enabled, string("health_check.bind_address", "127.0.0.1"),
                 integer("health_check.port", 8080, 1, 65535));
+    }
+
+    /** Every name under plugins:, including entries with errors; they still override plugins.json. */
+    private Set<String> pluginKeys() {
+        Set<String> out = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
+        if (get("plugins") instanceof Map<?, ?> map) {
+            for (Object key : map.keySet()) {
+                String name = String.valueOf(key).trim();
+                if (!name.isEmpty()) {
+                    out.add(name);
+                }
+            }
+        }
+        return java.util.Collections.unmodifiableSet(out);
     }
 
     private Map<String, PluginEntry> plugins() {

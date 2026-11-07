@@ -136,14 +136,14 @@ public final class ResultReporter implements UpdateListener {
                         Messages.text("command", "/updateplugins reject <plugin>")));
             }
             if (!changes.removed().isEmpty()) {
-                console(m.format("<muted>No longer waiting for a decision (uninstalled or now in config.yml): <list>",
+                console(m.format("<muted>Removed from plugins.json (uninstalled, or now in config.yml or modes.exclude_list): <list>",
                         Messages.text("list", String.join(", ", changes.removed()))));
             }
         }
         if (!changes.pending().isEmpty() && settings().notifications().inGame()) {
             notifyPlayers(m.prefixed("<warning>New plugin(s) found: <accent><list></accent>. They wait for confirmation. "
                             + "<click:run_command:'/updateplugins pending'><primary>[review]</primary></click>",
-                    Messages.text("list", String.join(", ", changes.pending()))));
+                    Messages.text("list", String.join(", ", changes.pending()))), Permissions.CONFIRM);
         }
         if (requester != null && !(requester instanceof org.bukkit.command.ConsoleCommandSender)) {
             if (changes.isEmpty()) {
@@ -157,7 +157,7 @@ public final class ResultReporter implements UpdateListener {
         } else if (requester != null && changes.isEmpty()) {
             console(m.format("<success>No new plugins found."));
         }
-        if (requester != null && !registry.pendingNames().isEmpty()) {
+        if (requester != null && !registry.pendingNames().isEmpty() && requester.hasPermission(Permissions.CONFIRM)) {
             m.send(requester, "<muted>Review found plugins with <accent>/updateplugins pending</accent>.");
         }
     }
@@ -233,12 +233,16 @@ public final class ResultReporter implements UpdateListener {
     }
 
     private void notifyPlayers(Component message) {
+        notifyPlayers(message, Permissions.NOTIFY);
+    }
+
+    private void notifyPlayers(Component message, String permission) {
         if (!plugin.isEnabled()) {
             return;
         }
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (Player p : Bukkit.getOnlinePlayers()) {
-                if (p.hasPermission(Permissions.NOTIFY)) {
+                if (p.hasPermission(permission)) {
                     p.sendMessage(message);
                 }
             }
