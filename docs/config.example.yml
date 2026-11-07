@@ -7,9 +7,7 @@
 global:
   min_version: ""
   max_version: ""
-  auto_update_config: true
-  auto_discover: true
-  auto_discover_on_startup: false
+  auto_detect: true   # found plugins wait in plugins.json for /updateplugins confirm
   parallelism: 4
   max_download_mb: 256
 

@@ -3,14 +3,14 @@ package com.hanafubuki.updater.http;
 import java.net.URI;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Collections;
+import java.util.Iterator;
 import java.util.LinkedHashMap;
 
 /**
  * Stores the last successful response of a GET request together with its validators
  * (ETag / Last-Modified). On the next request the validators are sent and a
- * "304 Not Modified" answer is served from here. GitHub does not count 304 answers
- * against the API rate limit.
+ * "304 Not Modified" answer is served from here. This saves traffic and parsing; GitHub only
+ * leaves 304 answers out of the rate limit for requests with a token (github.token).
  */
 public interface HttpCache {
 
@@ -22,23 +22,54 @@ public interface HttpCache {
 
     void put(URI uri, Entry entry);
 
-    /** In-memory cache that keeps the {@code maxEntries} most recently used responses. */
+    /**
+     * Default budget of {@link #inMemory(int)}: 4M characters, i.e. 4-8 MB of heap (a body with
+     * characters outside Latin-1 takes two bytes per character).
+     */
+    long DEFAULT_MAX_CHARS = 4L * 1024 * 1024;
+
+    /** In-memory cache of the {@code maxEntries} most recently used responses, within {@link #DEFAULT_MAX_CHARS}. */
     static HttpCache inMemory(int maxEntries) {
-        Map<String, Entry> map = Collections.synchronizedMap(new LinkedHashMap<>(16, 0.75f, true) {
-            @Override
-            protected boolean removeEldestEntry(Map.Entry<String, Entry> eldest) {
-                return size() > maxEntries;
-            }
-        });
+        return inMemory(maxEntries, DEFAULT_MAX_CHARS);
+    }
+
+    /**
+     * In-memory LRU cache limited by entry count and by the total length of the cached bodies,
+     * so a few large version lists cannot fill the server's memory. A body longer than a quarter
+     * of the budget is not cached.
+     */
+    static HttpCache inMemory(int maxEntries, long maxChars) {
+        long maxEntryChars = Math.max(1, maxChars / 4);
+        LinkedHashMap<String, Entry> map = new LinkedHashMap<>(16, 0.75f, true);
         return new HttpCache() {
+            private long chars;
+
             @Override
-            public Optional<Entry> get(URI uri) {
+            public synchronized Optional<Entry> get(URI uri) {
                 return Optional.ofNullable(map.get(uri.toString()));
             }
 
             @Override
-            public void put(URI uri, Entry entry) {
-                map.put(uri.toString(), entry);
+            public synchronized void put(URI uri, Entry entry) {
+                String key = uri.toString();
+                Entry old = map.remove(key);
+                if (old != null) {
+                    chars -= size(old);
+                }
+                if (entry == null || size(entry) > maxEntryChars) {
+                    return;
+                }
+                map.put(key, entry);
+                chars += size(entry);
+                Iterator<Map.Entry<String, Entry>> it = map.entrySet().iterator();
+                while ((map.size() > maxEntries || chars > maxChars) && it.hasNext()) {
+                    chars -= size(it.next().getValue());
+                    it.remove();
+                }
+            }
+
+            private static long size(Entry e) {
+                return (e.body() == null ? 0 : e.body().length()) + 64;
             }
         };
     }

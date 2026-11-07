@@ -79,6 +79,10 @@ public final class UpdateScheduler {
     }
 
     private void fire(String trigger) {
+        // New plugins are only recorded for review; they are not part of this run.
+        if (trigger.equals("schedule") && plugin.configSettings().general().autoDetect()) {
+            plugin.detect(null, false);
+        }
         if (plugin.manager().isRunning()) {
             plugin.getLogger().info("Skipping the " + trigger + " check: another run is still active");
             return;

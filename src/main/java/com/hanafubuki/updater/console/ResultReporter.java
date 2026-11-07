@@ -4,6 +4,7 @@ import java.time.Instant;
 import java.util.function.Supplier;
 
 import org.bukkit.Bukkit;
+import org.bukkit.command.CommandSender;
 import org.bukkit.entity.Player;
 import org.bukkit.plugin.java.JavaPlugin;
 
@@ -14,6 +15,7 @@ import com.google.gson.JsonObject;
 import com.hanafubuki.updater.Permissions;
 import com.hanafubuki.updater.config.ConfigManager;
 import com.hanafubuki.updater.config.UpdaterSettings;
+import com.hanafubuki.updater.discovery.PluginRegistry;
 import com.hanafubuki.updater.manager.PluginResult;
 import com.hanafubuki.updater.manager.UpdateListener;
 import com.hanafubuki.updater.manager.UpdateReport;
@@ -22,8 +24,8 @@ import com.hanafubuki.updater.source.GitHubAdvisories;
 import net.kyori.adventure.text.Component;
 
 /**
- * Turns run progress into console lines (styled or JSON), writes new versions into config.yml
- * and notifies players with {@code hanafubuki.updater.notify}.
+ * Turns run progress into console lines (styled or JSON) and notifies players with
+ * {@code hanafubuki.updater.notify}.
  */
 public final class ResultReporter implements UpdateListener {
 
@@ -60,9 +62,6 @@ public final class ResultReporter implements UpdateListener {
 
     @Override
     public void onPluginResult(PluginResult r) {
-        if (r.status() == PluginResult.Status.UPDATED && settings().general().autoUpdateConfig()) {
-            config.setPluginVersion(r.plugin(), r.candidateVersion());
-        }
         if (settings().consoleJson()) {
             plugin.getLogger().info(gson.toJson(json(r)));
         } else {
@@ -102,6 +101,86 @@ public final class ResultReporter implements UpdateListener {
             return;
         }
         console(summary(report));
+    }
+
+    /**
+     * Reports what a plugin detection found. Main thread.
+     *
+     * @param requester gets a summary when the detection was started by hand; null otherwise
+     */
+    public void onDetection(PluginRegistry.Changes changes, PluginRegistry registry, CommandSender requester) {
+        Messages m = messages.get();
+        if (settings().consoleJson()) {
+            if (!changes.isEmpty()) {
+                JsonObject o = base("plugins_detected");
+                o.add("pending", array(changes.pending()));
+                o.add("unidentified", array(changes.unidentified()));
+                o.add("removed", array(changes.removed()));
+                plugin.getLogger().info(gson.toJson(o));
+            }
+        } else {
+            for (String name : changes.pending()) {
+                registry.get(name).ifPresent(e -> console(m.format(
+                        "<warning>New plugin <accent><name></accent> <version> found: <source> <options> <muted>(<reason>)",
+                        Messages.text("name", e.name()), Messages.text("version", e.version()),
+                        Messages.text("source", e.source()), Messages.text("options", options(e)),
+                        Messages.text("reason", e.reason()))));
+            }
+            if (!changes.pending().isEmpty()) {
+                console(m.format("<warning>New plugins are not updated until an op confirms them: <commands>, or the menu.",
+                        Messages.text("commands", "/updateplugins pending, confirm <plugin>|all, reject <plugin>")));
+            }
+            if (!changes.unidentified().isEmpty()) {
+                console(m.format("<muted>No source found for <list>. Add them to config.yml to update them, "
+                        + "or hide them with <command>.", Messages.text("list", String.join(", ", changes.unidentified())),
+                        Messages.text("command", "/updateplugins reject <plugin>")));
+            }
+            if (!changes.removed().isEmpty()) {
+                console(m.format("<muted>Removed from plugins.json (uninstalled, or now in config.yml or modes.exclude_list): <list>",
+                        Messages.text("list", String.join(", ", changes.removed()))));
+            }
+        }
+        if (!changes.pending().isEmpty() && settings().notifications().inGame()) {
+            notifyPlayers(m.prefixed("<warning>New plugin(s) found: <accent><list></accent>. They wait for confirmation. "
+                            + "<click:run_command:'/updateplugins pending'><primary>[review]</primary></click>",
+                    Messages.text("list", String.join(", ", changes.pending()))), Permissions.CONFIRM);
+        }
+        if (requester != null && !(requester instanceof org.bukkit.command.ConsoleCommandSender)) {
+            if (changes.isEmpty()) {
+                m.send(requester, "<success>No new plugins found.");
+            } else {
+                m.send(requester, "<primary>Detection finished: <accent><pending></accent> new to review, "
+                                + "<accent><unidentified></accent> without a source, <accent><removed></accent> removed.",
+                        Messages.text("pending", changes.pending().size()), Messages.text("unidentified", changes.unidentified().size()),
+                        Messages.text("removed", changes.removed().size()));
+            }
+        } else if (requester != null && changes.isEmpty()) {
+            console(m.format("<success>No new plugins found."));
+        }
+        if (requester != null && !registry.pendingNames().isEmpty() && requester.hasPermission(Permissions.CONFIRM)) {
+            m.send(requester, "<muted>Review found plugins with <accent>/updateplugins pending</accent>.");
+        }
+    }
+
+    /** Source options as "key=value, ..." for messages. */
+    public static String options(PluginRegistry.Entry e) {
+        if (e.options().isEmpty()) {
+            return "";
+        }
+        StringBuilder sb = new StringBuilder();
+        new java.util.TreeMap<>(e.options()).forEach((k, v) -> {
+            if (sb.length() > 0) {
+                sb.append(", ");
+            }
+            sb.append(k).append('=').append(v);
+        });
+        return sb.toString();
+    }
+
+    private static JsonArray array(java.util.List<String> values) {
+        JsonArray a = new JsonArray();
+        values.forEach(a::add);
+        return a;
     }
 
     /** One-line summary of a run, also used for command feedback. */
@@ -154,12 +233,16 @@ public final class ResultReporter implements UpdateListener {
     }
 
     private void notifyPlayers(Component message) {
+        notifyPlayers(message, Permissions.NOTIFY);
+    }
+
+    private void notifyPlayers(Component message, String permission) {
         if (!plugin.isEnabled()) {
             return;
         }
         Bukkit.getScheduler().runTask(plugin, () -> {
             for (Player p : Bukkit.getOnlinePlayers()) {
-                if (p.hasPermission(Permissions.NOTIFY)) {
+                if (p.hasPermission(permission)) {
                     p.sendMessage(message);
                 }
             }

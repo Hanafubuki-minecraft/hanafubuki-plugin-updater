@@ -9,8 +9,6 @@ import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
-import java.util.Set;
-import java.util.TreeSet;
 
 import org.bukkit.Bukkit;
 import org.bukkit.plugin.Plugin;
@@ -38,13 +36,11 @@ public final class ServerPlugins {
         return out;
     }
 
-    /** Loaded plugins that are not configured yet, as discovery candidates. */
-    public static List<PluginDiscovery.Candidate> unconfigured(Set<String> configuredNames, String selfName) {
-        TreeSet<String> configured = new TreeSet<>(String.CASE_INSENSITIVE_ORDER);
-        configured.addAll(configuredNames);
+    /** Every loaded plugin from a jar except {@code selfName}, as detection candidates. */
+    public static List<PluginDiscovery.Candidate> candidates(String selfName) {
         List<PluginDiscovery.Candidate> out = new ArrayList<>();
         for (Plugin p : Bukkit.getPluginManager().getPlugins()) {
-            if (configured.contains(p.getName()) || p.getName().equalsIgnoreCase(selfName)) {
+            if (p.getName().equalsIgnoreCase(selfName)) {
                 continue;
             }
             Optional<Path> jar = jarOf(p);

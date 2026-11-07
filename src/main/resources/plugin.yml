@@ -29,6 +29,7 @@ permissions:
       hanafubuki.updater.metrics: true
       hanafubuki.updater.rollback: true
       hanafubuki.updater.discover: true
+      hanafubuki.updater.confirm: true
       hanafubuki.updater.reload: true
       hanafubuki.updater.notifytest: true
       hanafubuki.updater.gui: true
@@ -58,7 +59,10 @@ permissions:
     description: List backups, roll back and remove staged updates (backups, rollback, unstage)
     default: op
   hanafubuki.updater.discover:
-    description: Find and add installed plugins missing from config.yml (discover)
+    description: Look for installed plugins missing from config.yml now (discover)
+    default: op
+  hanafubuki.updater.confirm:
+    description: Review, confirm and reject automatically found plugins (pending, confirm, reject, menu)
     default: op
   hanafubuki.updater.reload:
     description: Reload config.yml (reload)

@@ -309,8 +309,8 @@ class ModrinthSourceTest {
         source().findLatest(request(Map.of("project_id", "luckperms")));
 
         FakeHttpServer.Request r = server.requests("/v2/project/luckperms/version").get(0);
-        assertEquals("loaders=%5B%22paper%22%5D&game_versions=%5B%221.21.9%22%5D", r.query());
-        assertEquals(Map.of("loaders", "[\"paper\"]", "game_versions", "[\"1.21.9\"]"), query(r));
+        assertEquals("loaders=%5B%22paper%22%5D&game_versions=%5B%221.21.9%22%5D&include_changelog=false", r.query());
+        assertEquals(Map.of("loaders", "[\"paper\"]", "game_versions", "[\"1.21.9\"]", "include_changelog", "false"), query(r));
     }
 
     @Test

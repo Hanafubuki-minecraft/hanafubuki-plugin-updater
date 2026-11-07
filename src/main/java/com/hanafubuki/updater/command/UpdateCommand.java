@@ -25,7 +25,10 @@ import org.bukkit.entity.Player;
 import com.hanafubuki.updater.Permissions;
 import com.hanafubuki.updater.PluginUpdater;
 import com.hanafubuki.updater.ServerPlugins;
+import com.hanafubuki.updater.config.UpdaterSettings;
 import com.hanafubuki.updater.console.Messages;
+import com.hanafubuki.updater.console.ResultReporter;
+import com.hanafubuki.updater.discovery.PluginRegistry;
 import com.hanafubuki.updater.gui.UpdaterMenu;
 import com.hanafubuki.updater.manager.BackupManager;
 import com.hanafubuki.updater.manager.Installer;
@@ -54,7 +57,10 @@ public final class UpdateCommand implements TabExecutor {
             new Sub("backups", Permissions.ROLLBACK, "backups <plugin>", "list stored previous versions"),
             new Sub("rollback", Permissions.ROLLBACK, "rollback <plugin> [version]", "restore a previous version on restart"),
             new Sub("unstage", Permissions.ROLLBACK, "unstage <plugin>", "remove a downloaded update before restart"),
-            new Sub("discover", Permissions.DISCOVER, "discover [add] [plugin]", "find installed plugins missing from config"),
+            new Sub("pending", Permissions.CONFIRM, "pending", "plugins found automatically, waiting for a decision"),
+            new Sub("confirm", Permissions.CONFIRM, "confirm <plugin|all>", "update a found plugin from now on"),
+            new Sub("reject", Permissions.CONFIRM, "reject <plugin>", "never update a found plugin (can be confirmed later)"),
+            new Sub("discover", Permissions.DISCOVER, "discover", "look for new plugins now"),
             new Sub("metrics", Permissions.METRICS, "metrics [--prometheus]", "show counters"),
             new Sub("notify", Permissions.NOTIFY_TEST, "notify test", "send a test Discord/webhook message"),
             new Sub("gui", Permissions.GUI, "gui", "open the menu"),
@@ -68,6 +74,11 @@ public final class UpdateCommand implements TabExecutor {
 
     private Messages m() {
         return plugin.messages();
+    }
+
+    /** Runs a sub-command as if typed, with all permission checks (used by the menu). */
+    public void run(CommandSender sender, String... args) {
+        onCommand(sender, null, "updateplugins", args);
     }
 
     @Override
@@ -104,6 +115,9 @@ public final class UpdateCommand implements TabExecutor {
             case "backups" -> backups(sender, rest);
             case "rollback" -> rollback(sender, rest);
             case "unstage" -> unstage(sender, rest);
+            case "pending" -> pending(sender);
+            case "confirm" -> confirm(sender, rest);
+            case "reject" -> reject(sender, rest);
             case "discover" -> discover(sender, rest);
             case "metrics" -> metrics(sender, rest);
             case "notify" -> notifyTest(sender, rest);
@@ -154,7 +168,7 @@ public final class UpdateCommand implements TabExecutor {
             m().send(sender, "<warning>A check is already running. Use <accent>/updateplugins stop</accent> to cancel it.");
             return;
         }
-        String what = options.only() == null ? "all configured plugins" : String.join(", ", options.only());
+        String what = options.only() == null ? "all tracked plugins" : String.join(", ", options.only());
         m().send(sender, options.dryRun()
                         ? "<primary>Checking <accent><what></accent> for updates (nothing is downloaded)..."
                         : "<primary>Updating <accent><what></accent> in the background...",
@@ -188,7 +202,15 @@ public final class UpdateCommand implements TabExecutor {
         Messages m = m();
         m.send(sender, "<primary>Plugin updater <accent><version></accent>", Messages.text("version", plugin.getPluginMeta().getVersion()));
         m.sendLine(sender, "<muted>  Running: <accent><running>", Messages.text("running", plugin.manager().isRunning() ? "yes" : "no"));
-        m.sendLine(sender, "<muted>  Tracked plugins: <accent><count>", Messages.text("count", plugin.settings().plugins().size()));
+        int tracked = plugin.settings().plugins().size();
+        int fromConfig = plugin.configSettings().plugins().size();
+        m.sendLine(sender, "<muted>  Tracked plugins: <accent><count></accent> (<config> from config.yml, <found> confirmed from plugins.json)",
+                Messages.text("count", tracked), Messages.text("config", fromConfig), Messages.text("found", tracked - fromConfig));
+        int waiting = plugin.registry().pendingNames().size();
+        if (waiting > 0) {
+            m.sendLine(sender, "<warning>  <count> found plugin(s) wait for confirmation: /updateplugins pending",
+                    Messages.text("count", waiting));
+        }
         m.sendLine(sender, "<muted>  Schedule: <accent><schedule></accent><next>",
                 Messages.text("schedule", plugin.settings().schedule().describe()),
                 Messages.text("next", plugin.scheduler().nextRun().map(t -> ", next " + TIME.format(t)).orElse("")));
@@ -248,7 +270,7 @@ public final class UpdateCommand implements TabExecutor {
 
     private boolean backups(CommandSender sender, String[] args) {
         if (args.length < 1) {
-            m().send(sender, "<warning>Usage: /updateplugins backups <plugin>");
+            m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins backups <plugin>"));
             return true;
         }
         String name = args[0];
@@ -278,7 +300,7 @@ public final class UpdateCommand implements TabExecutor {
 
     private boolean rollback(CommandSender sender, String[] args) {
         if (args.length < 1) {
-            m().send(sender, "<warning>Usage: /updateplugins rollback <plugin> [version]");
+            m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins rollback <plugin> [version]"));
             return true;
         }
         Optional<InstalledPlugin> installed = installed(args[0]);
@@ -290,27 +312,43 @@ public final class UpdateCommand implements TabExecutor {
             m().send(sender, "<warning>Wait until the running check has finished (or /updateplugins stop).");
             return true;
         }
-        String version = args.length > 1 ? args[1] : null;
+        // Versions from plugin.yml may contain spaces, e.g. "2.0.0 (b123)".
+        String version = args.length > 1 ? String.join(" ", Arrays.copyOfRange(args, 1, args.length)) : null;
+        restore(sender, installed.get(), version, null);
+        return true;
+    }
+
+    /**
+     * Stages a backup in the background: {@code backupFile} if given (the menu passes the clicked
+     * backup), otherwise the newest backup of {@code version} (or the newest of all if null).
+     */
+    public void restore(CommandSender sender, InstalledPlugin installed, String version, Path backupFile) {
         Path updateFolder = plugin.updateFolder();
         plugin.runBackground(() -> {
+            if (plugin.manager().isRunning()) {
+                // A run may have started since the command was typed; it could stage over the rollback.
+                plugin.runSync(() -> m().send(sender, "<warning>Wait until the running check has finished (or /updateplugins stop)."));
+                return;
+            }
             try {
-                BackupManager.Backup b = plugin.backups().restore(version, installed.get(), updateFolder);
-                plugin.state().hold(installed.get().name(), b.version(), Instant.now());
+                BackupManager.Backup b = backupFile != null
+                        ? plugin.backups().restoreFile(backupFile, installed, updateFolder)
+                        : plugin.backups().restore(version, installed, updateFolder);
+                plugin.state().hold(installed.name(), b.version(), Instant.now());
                 plugin.runSync(() -> m().send(sender, "<success><name> <version> is staged and replaces <current> on the next restart. "
                                 + "Automatic updates of this plugin are paused; resume with <accent>/updateplugins unstage <name></accent> "
                                 + "after the restart.",
-                        Messages.text("name", installed.get().name()), Messages.text("version", b.version()),
-                        Messages.text("current", installed.get().version())));
+                        Messages.text("name", installed.name()), Messages.text("version", b.version()),
+                        Messages.text("current", installed.version())));
             } catch (IOException e) {
                 plugin.runSync(() -> m().send(sender, "<error>Rollback failed: <e>", Messages.text("e", e.getMessage())));
             }
         });
-        return true;
     }
 
     private boolean unstage(CommandSender sender, String[] args) {
         if (args.length < 1) {
-            m().send(sender, "<warning>Usage: /updateplugins unstage <plugin>");
+            m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins unstage <plugin>"));
             return true;
         }
         Optional<InstalledPlugin> installed = installed(args[0]);
@@ -324,6 +362,10 @@ public final class UpdateCommand implements TabExecutor {
         }
         Path staged = Installer.stagedPath(installed.get(), plugin.updateFolder());
         plugin.runBackground(() -> {
+            if (plugin.manager().isRunning()) {
+                plugin.runSync(() -> m().send(sender, "<warning>Wait until the running check has finished (or /updateplugins stop)."));
+                return;
+            }
             try {
                 boolean deleted = Files.deleteIfExists(staged);
                 plugin.state().clearStaged(installed.get().name());
@@ -349,16 +391,177 @@ public final class UpdateCommand implements TabExecutor {
     }
 
     private boolean discover(CommandSender sender, String[] args) {
-        boolean add = args.length > 0 && args[0].equalsIgnoreCase("add");
-        String only = add ? (args.length > 1 && !args[1].equalsIgnoreCase("all") ? args[1] : null)
-                : (args.length > 0 ? args[0] : null);
-        if (!plugin.settings().general().autoDiscover() && add) {
-            m().send(sender, "<warning>Adding plugins needs <accent>global.auto_discover: true</accent> in config.yml. "
-                    + "Listing still works.");
+        if (args.length > 0 && args[0].equalsIgnoreCase("add")) {
+            m().send(sender, "<warning><accent>discover add</accent> was replaced: found plugins wait in plugins.json "
+                    + "until you confirm them with <accent>/updateplugins pending</accent> and <accent>confirm</accent>.");
             return true;
         }
-        plugin.discover(sender, add, only);
+        if (!plugin.detect(sender, true)) {
+            m().send(sender, "<warning>A search for new plugins is already running.");
+            return true;
+        }
+        m().send(sender, "<primary>Looking for installed plugins that are not tracked yet...");
         return true;
+    }
+
+    private boolean pending(CommandSender sender) {
+        Messages m = m();
+        List<PluginRegistry.Entry> entries = plugin.registry().entries();
+        if (entries.isEmpty()) {
+            m.send(sender, "<muted>No plugins were found automatically. Search now with <accent>/updateplugins discover</accent>.");
+            return true;
+        }
+        boolean player = sender instanceof Player;
+        List<PluginRegistry.Entry> pending = byStatus(entries, PluginRegistry.Status.PENDING);
+        List<PluginRegistry.Entry> unidentified = byStatus(entries, PluginRegistry.Status.UNIDENTIFIED);
+        List<PluginRegistry.Entry> confirmed = byStatus(entries, PluginRegistry.Status.CONFIRMED);
+        List<PluginRegistry.Entry> rejected = byStatus(entries, PluginRegistry.Status.REJECTED);
+
+        m.send(sender, "<primary>Plugins found automatically <muted>(plugins.json; config.yml entries always win)");
+        if (pending.isEmpty()) {
+            m.sendLine(sender, "<success>  Nothing waits for confirmation.");
+        } else {
+            m.sendLine(sender, "<warning>  Waiting for confirmation (<count>), not updated yet:", Messages.text("count", pending.size()));
+            for (PluginRegistry.Entry e : pending) {
+                m.sendLine(sender, "<accent>    <name></accent> <muted><version></muted> -> <accent><source></accent> <options>"
+                                + " <muted>(<reason>)</muted>" + (player ? " <confirm><success>[confirm]</success></confirm> "
+                                + "<reject><error>[reject]</error></reject>" : ""),
+                        Messages.text("name", e.name()), Messages.text("version", e.version()),
+                        Messages.text("source", e.source()), Messages.text("options", ResultReporter.options(e)),
+                        Messages.text("reason", e.reason()),
+                        click("confirm", "/updateplugins confirm " + e.name()), click("reject", "/updateplugins reject " + e.name()));
+            }
+            m.sendLine(sender, "<muted>  <hint>", Messages.text("hint",
+                    "Confirm one with /updateplugins confirm <plugin>, all with /updateplugins confirm all."));
+        }
+        if (!unidentified.isEmpty()) {
+            m.sendLine(sender, "<muted>  No source found (<count>); add them to config.yml to update them:",
+                    Messages.text("count", unidentified.size()));
+            for (PluginRegistry.Entry e : unidentified) {
+                m.sendLine(sender, "<muted>    <name> <version>: <reason>" + (player ? " <reject>[hide]</reject>" : ""),
+                        Messages.text("name", e.name()), Messages.text("version", e.version()),
+                        Messages.text("reason", e.reason()), click("reject", "/updateplugins reject " + e.name()));
+            }
+        }
+        if (!confirmed.isEmpty()) {
+            m.sendLine(sender, "<success>  Confirmed, updated (<count>): <list>", Messages.text("count", confirmed.size()),
+                    Messages.text("list", names(confirmed)));
+        }
+        if (!rejected.isEmpty()) {
+            m.sendLine(sender, "<muted>  Rejected, not updated (<count>): <list>", Messages.text("count", rejected.size()),
+                    Messages.text("list", names(rejected)));
+        }
+        return true;
+    }
+
+    private static List<PluginRegistry.Entry> byStatus(List<PluginRegistry.Entry> entries, PluginRegistry.Status status) {
+        return entries.stream().filter(e -> e.status() == status).toList();
+    }
+
+    private String names(List<PluginRegistry.Entry> entries) {
+        return String.join(", ", entries.stream()
+                .map(e -> plugin.inConfig(e.name()) ? e.name() + " (config.yml overrides)" : e.name()).toList());
+    }
+
+    private static net.kyori.adventure.text.minimessage.tag.resolver.TagResolver click(String tag, String command) {
+        return net.kyori.adventure.text.minimessage.tag.resolver.Placeholder.styling(tag,
+                net.kyori.adventure.text.event.ClickEvent.runCommand(command));
+    }
+
+    private static String by(CommandSender sender) {
+        return sender instanceof Player p ? p.getName() : "console";
+    }
+
+    private boolean confirm(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins confirm <plugin|all>"));
+            return true;
+        }
+        String name = String.join(" ", args);
+        if (name.equalsIgnoreCase("all") && plugin.registry().get(name).isEmpty()) {
+            List<String> done = plugin.registry().confirmAllPending(by(sender), Instant.now());
+            if (done.isEmpty()) {
+                m().send(sender, "<muted>Nothing waits for confirmation.");
+            } else {
+                m().send(sender, "<success>Confirmed <count> plugin(s); they are updated from now on: <accent><list>",
+                        Messages.text("count", done.size()), Messages.text("list", String.join(", ", done)));
+                done.forEach(n -> includeOnlyHint(sender, n));
+            }
+            return true;
+        }
+        confirmOne(sender, name);
+        return true;
+    }
+
+    /** Confirms one found plugin by name (the menu uses this, so a plugin named "all" works too). */
+    public void confirmOne(CommandSender sender, String name) {
+        PluginRegistry.Outcome outcome = plugin.registry().confirm(name, by(sender), Instant.now());
+        String display = plugin.registry().get(name).map(PluginRegistry.Entry::name).orElse(name);
+        switch (outcome) {
+            case CHANGED -> {
+                PluginRegistry.Entry e = plugin.registry().get(name).orElseThrow();
+                m().send(sender, "<success><name> is confirmed and is updated from now on via <accent><source></accent> <muted><options>",
+                        Messages.text("name", display), Messages.text("source", e.source()),
+                        Messages.text("options", ResultReporter.options(e)));
+                if (plugin.inConfig(name)) {
+                    m().send(sender, "<muted>config.yml also has an entry for <name>; that entry is used instead.",
+                            Messages.text("name", display));
+                }
+                includeOnlyHint(sender, display);
+            }
+            case UNCHANGED -> m().send(sender, "<muted><name> is already confirmed.", Messages.text("name", display));
+            case NO_SOURCE -> m().send(sender, "<warning>No source is known for <name>, so it can't be confirmed. "
+                    + "Add it to config.yml under <accent>plugins:</accent> with its source (see docs/configuration.md), "
+                    + "then /updateplugins reload.", Messages.text("name", display));
+            case NOT_FOUND -> {
+                if (plugin.inConfig(name)) {
+                    m().send(sender, "<muted><name> is in config.yml and is already updated from there.", Messages.text("name", name));
+                } else {
+                    m().send(sender, "<error><name> was not found automatically. See <accent>/updateplugins pending</accent>.",
+                            Messages.text("name", name));
+                }
+            }
+        }
+    }
+
+    private void includeOnlyHint(CommandSender sender, String name) {
+        UpdaterSettings.Modes modes = plugin.configSettings().modes();
+        if (modes.isExcluded(name)) {
+            m().send(sender, "<warning><name> is in modes.exclude_list, so it is still not updated.", Messages.text("name", name));
+        } else if (modes.includeOnly() && !modes.isIncluded(name)) {
+            m().send(sender, "<warning>modes.include_only is on: add <name> to modes.include_list as well, or it is not updated.",
+                    Messages.text("name", name));
+        }
+    }
+
+    private boolean reject(CommandSender sender, String[] args) {
+        if (args.length == 0) {
+            m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins reject <plugin>"));
+            return true;
+        }
+        rejectOne(sender, String.join(" ", args));
+        return true;
+    }
+
+    /** Rejects one found plugin by name. */
+    public void rejectOne(CommandSender sender, String name) {
+        PluginRegistry.Outcome outcome = plugin.registry().reject(name, by(sender), Instant.now());
+        String display = plugin.registry().get(name).map(PluginRegistry.Entry::name).orElse(name);
+        switch (outcome) {
+            case CHANGED -> {
+                boolean usable = plugin.registry().get(name).map(PluginRegistry.Entry::isUsable).orElse(false);
+                m().send(sender, usable
+                                ? "<success><name> is rejected and not updated. Confirm it later with "
+                                + "<accent>/updateplugins confirm <name></accent> if you change your mind."
+                                : "<success><name> is hidden. To update it, add it to config.yml with its source.",
+                        Messages.text("name", display));
+            }
+            case UNCHANGED -> m().send(sender, "<muted><name> is already rejected.", Messages.text("name", display));
+            case NOT_FOUND, NO_SOURCE -> m().send(sender, plugin.inConfig(name)
+                            ? "<warning><name> is in config.yml; remove it there (or add it to modes.exclude_list) to stop updating it."
+                            : "<error><name> was not found automatically. See <accent>/updateplugins pending</accent>.",
+                    Messages.text("name", name));
+        }
     }
 
     private boolean metrics(CommandSender sender, String[] args) {
@@ -381,7 +584,7 @@ public final class UpdateCommand implements TabExecutor {
 
     private boolean notifyTest(CommandSender sender, String[] args) {
         if (args.length == 0 || !args[0].equalsIgnoreCase("test")) {
-            m().send(sender, "<warning>Usage: /updateplugins notify test");
+            m().send(sender, "<warning>Usage: <usage>", Messages.text("usage", "/updateplugins notify test"));
             return true;
         }
         if (!plugin.notifications().anyEnabled()) {
@@ -448,6 +651,14 @@ public final class UpdateCommand implements TabExecutor {
             return filter(subs.stream(), args[0]);
         }
         String sub = args[0].toLowerCase(Locale.ROOT);
+        Optional<Sub> found = SUBS.stream().filter(x -> x.name().equals(sub)).findFirst();
+        boolean allowed = found.isPresent() && (sub.equals("update")
+                ? sender.hasPermission(Permissions.UPDATE) || sender.hasPermission(Permissions.CHECK)
+                : sender.hasPermission(found.get().permission()));
+        if (!allowed) {
+            // Plugin names are only shown to those who may use the sub-command.
+            return List.of();
+        }
         String last = args[args.length - 1];
         Stream<String> configured = plugin.settings().plugins().keySet().stream();
         return switch (sub) {
@@ -455,11 +666,19 @@ public final class UpdateCommand implements TabExecutor {
             case "update" -> filter(Stream.concat(Stream.of("all", "--dry-run"), configured), last);
             case "stats" -> args.length == 2 ? filter(configured, last) : List.of();
             case "backups", "rollback", "unstage" -> args.length == 2 ? filter(configured, last) : List.of();
-            case "discover" -> args.length == 2 ? filter(Stream.of("add"), last) : List.of();
+            case "confirm" -> args.length == 2 ? filter(Stream.concat(Stream.of("all"),
+                    found(PluginRegistry.Status.PENDING, PluginRegistry.Status.REJECTED)), last) : List.of();
+            case "reject" -> args.length == 2 ? filter(found(PluginRegistry.Status.PENDING, PluginRegistry.Status.CONFIRMED,
+                    PluginRegistry.Status.UNIDENTIFIED), last) : List.of();
             case "metrics" -> args.length == 2 ? filter(Stream.of("--prometheus"), last) : List.of();
             case "notify" -> args.length == 2 ? filter(Stream.of("test"), last) : List.of();
             default -> List.of();
         };
+    }
+
+    private Stream<String> found(PluginRegistry.Status... statuses) {
+        List<PluginRegistry.Status> wanted = List.of(statuses);
+        return plugin.registry().entries().stream().filter(e -> wanted.contains(e.status())).map(PluginRegistry.Entry::name);
     }
 
     private static List<String> filter(Stream<String> options, String prefix) {

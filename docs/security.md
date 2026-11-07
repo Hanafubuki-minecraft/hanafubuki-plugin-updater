@@ -7,15 +7,15 @@ can go wrong, what the plugin does about each case, and what it cannot protect a
 
 | Threat | Example | Mitigation |
 |---|---|---|
-| Wrong plugin substituted | A look-alike project with the same name; the first search result is someone else's plugin | No name searches on Modrinth (the installed jar is identified by its SHA-512); `project_slug`, `repo`, `resource_id` are explicit; a Spigot `resource_name` must match exactly one resource; GitHub assets are never guessed; every downloaded jar must contain a descriptor whose `name` equals the installed plugin's name |
+| Wrong plugin substituted | A look-alike project with the same name; the first search result is someone else's plugin | Automatically found plugins are never updated until an op confirms them (`/updateplugins pending`, `confirm`); no name searches on Modrinth (the installed jar is identified by its SHA-512); `project_slug`, `repo`, `resource_id` are explicit; a Spigot `resource_name` must match exactly one resource; GitHub assets are never guessed; every downloaded jar must contain a descriptor whose `name` equals the installed plugin's name |
 | Tampered download / MITM | A proxy or mirror changes the file in transit | HTTPS everywhere; redirects from `https` to `http` are refused; `http` for custom sources only with `allow_http: true`; checksums from the source are verified before staging and a mismatch rejects the file |
 | Malicious or compromised source | A hijacked author account publishes a backdoored release on the real project | Cannot be detected by a hash (the hash comes from the same source). Reduced by: `github.signatures: require`, `schedule.check_only: true` plus manual review, `max_version` pins, the dependency check, GitHub security advisories, backups and one-command rollback |
 | Credential leak | A GitHub token or API key forwarded to a CDN or a third-party host | Tokens are only attached to requests to the API origin; on a redirect to another origin every header except `User-Agent` and `Accept` is dropped; custom source `headers`/`auth` go to the download only when it is on the same origin as `url`; secrets can live in environment variables (`${NAME}`); URLs are logged without query strings |
 | Oversized files / zip bombs | A multi-GB "jar", a huge API answer or a crafted descriptor | Download limit `global.max_download_mb` (checked on `Content-Length` and while streaming); API bodies ≤ 32 MB; descriptor files read ≤ 1 MB and parsed with SnakeYAML's `SafeConstructor`; sidecar and checksum-list assets ≤ 64 KB |
 | Config mistakes | A typo in a key, a wrong source, an invalid regex or URL | `SettingsParser` reports every problem with its path and falls back to safe defaults; invalid YAML keeps the previous settings; each source's `validate()` turns a bad entry into `FAILED: invalid config` without affecting others; the default config updates nothing |
-| Half-written files | Crash or power loss during a download or a state write | Downloads go to a temporary `.part` file that is always deleted; staged jars, backups and `state.json` are moved into place atomically; running jars in `plugins/` are never written |
+| Half-written files | Crash or power loss during a download or a state write | Downloads go to a temporary `.part` file that is always deleted; staged jars, backups, `state.json` and `plugins.json` are moved into place atomically; config.yml is never written by the plugin; running jars in `plugins/` are never written |
 | Broken update | A new version needs a missing plugin or a newer server | `dependencies.check: block` refuses it; backups and `/updateplugins rollback`; a rolled-back plugin is held so it is not reinstalled automatically |
-| Unauthorised use in game | A player triggers updates or rollbacks | Every sub-command and GUI action has its own permission node, all default to op; plugin names and versions in messages are inserted as plain text (no MiniMessage injection) |
+| Unauthorised use in game | A player triggers updates or rollbacks, or confirms a found plugin | Every sub-command and GUI action has its own permission node, all default to op (confirming found plugins needs `hanafubuki.updater.confirm`); plugin names and versions in messages are inserted as plain text (no MiniMessage injection) |
 | Monitoring endpoint exposure | `/health` reachable from the internet | Off by default; binds to `127.0.0.1` by default; answers only `GET`; exposes counts and versions, no config or secrets |
 | Notification abuse | A plugin name containing `@everyone` | Discord `allowed_mentions` is limited to roles and users; webhook URLs must be `https` |
 
@@ -48,8 +48,11 @@ than the server.
 - **Advisories** come only from the repository's own published GitHub security advisories, and only for
   entries with `repo`.
 - **The updater runs with the server's permissions.** Anything it stages runs with full access after the
-  next restart. Anyone who can edit `config.yml` (or `plugins/update/`) can make the server run arbitrary
-  code; protect the data folder like the server itself.
+  next restart. Anyone who can edit `config.yml`, `plugins.json` (or `plugins/update/`) can make the server
+  run arbitrary code; protect the data folder like the server itself.
+- **A confirmed found plugin is trusted like a config.yml entry.** Detection only proposes a source (Modrinth
+  hash of the installed jar, or the plugin.yml `website`); check the source shown by `/updateplugins pending`
+  before confirming, especially GitHub repositories taken from a `website`.
 - **The health endpoint has no authentication.** Keep it on `127.0.0.1` or behind a firewall.
 - **Secrets in config.yml are plain text** unless you use `${NAME}` environment variables.
 
@@ -60,7 +63,8 @@ than the server.
 - Use `github.signatures: warn` (or `require` for projects that sign their tags/commits).
 - For critical plugins, use `schedule.check_only: true` and install with `/updateplugins update <plugin>`
   after reading the release notes.
-- Grant `hanafubuki.updater.check` / `status` to moderators, keep `update`, `rollback`, `reload` for admins.
+- Grant `hanafubuki.updater.check` / `status` to moderators, keep `update`, `rollback`, `reload`, `confirm` for
+  admins.
 
 ## Reporting a vulnerability
 
