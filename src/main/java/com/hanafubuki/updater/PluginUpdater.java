@@ -104,6 +104,8 @@ public final class PluginUpdater extends JavaPlugin {
         getServer().getPluginManager().registerEvents(new JoinListener(this), this);
 
         startHealthServer();
+        // After a restart Paper has applied the staged jars; forget them so nobody is told to restart again.
+        Bukkit.getScheduler().runTask(this, this::reconcileStaged);
         scheduler.start(config.settings().schedule());
         if (config.settings().general().discoverOnStartup()) {
             // Wait one tick so every plugin has finished enabling.
@@ -132,6 +134,21 @@ public final class PluginUpdater extends JavaPlugin {
             } catch (InterruptedException e) {
                 Thread.currentThread().interrupt();
             }
+        }
+    }
+
+    /** Clears staged-update records whose file is no longer in the update folder. Main thread. */
+    private void reconcileStaged() {
+        Map<String, com.hanafubuki.updater.source.InstalledPlugin> installed =
+                new java.util.TreeMap<>(String.CASE_INSENSITIVE_ORDER);
+        installed.putAll(ServerPlugins.snapshot());
+        Path updateFolder = ServerPlugins.updateFolder();
+        List<String> applied = state.reconcileStaged(name -> {
+            com.hanafubuki.updater.source.InstalledPlugin p = installed.get(name);
+            return p != null && java.nio.file.Files.exists(Installer.stagedPath(p, updateFolder));
+        });
+        if (!applied.isEmpty()) {
+            getLogger().info("Applied by the restart: " + String.join(", ", applied));
         }
     }
 
