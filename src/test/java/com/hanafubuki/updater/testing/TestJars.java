@@ -47,11 +47,11 @@ public final class TestJars {
         try {
             ByteArrayOutputStream bytes = new ByteArrayOutputStream();
             try (JarOutputStream out = new JarOutputStream(bytes)) {
-                out.putNextEntry(new ZipEntry(entryName));
+                out.putNextEntry(entry(entryName));
                 out.write(content.getBytes(StandardCharsets.UTF_8));
                 out.closeEntry();
                 // Unique filler so different versions never have the same hash.
-                out.putNextEntry(new ZipEntry("filler.txt"));
+                out.putNextEntry(entry("filler.txt"));
                 out.write((entryName + content).getBytes(StandardCharsets.UTF_8));
                 out.closeEntry();
             }
@@ -60,6 +60,15 @@ public final class TestJars {
             throw new IllegalStateException(e);
         }
     }
+
+    /** Zip entry with a fixed time, so the same content always gives the same bytes and hash. */
+    private static ZipEntry entry(String name) {
+        ZipEntry e = new ZipEntry(name);
+        e.setTime(FIXED_TIME);
+        return e;
+    }
+
+    private static final long FIXED_TIME = 1_700_000_000_000L;
 
     /** Writes a plugin jar to dir/fileName and returns its path. */
     public static Path write(Path dir, String fileName, byte[] content) throws IOException {

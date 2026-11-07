@@ -234,6 +234,30 @@ class ModrinthSourceTest {
     }
 
     @Test
+    void sameVersionPrefersTheBuildForTheFirstConfiguredLoader() throws IOException {
+        // Real BlueMap data: the Spigot build is published 10 seconds after the Paper build of the same version.
+        JsonObject spigot = version("S", "P", "5.16-spigot", "release", "2026-02-13T13:59:53Z", file("bluemap-5.16-spigot.jar", true, sha512("s")));
+        spigot.add("loaders", arr("spigot"));
+        JsonObject paper = version("PB", "P", "5.16-paper", "release", "2026-02-13T13:59:43Z", file("bluemap-5.16-paper.jar", true, sha512("p")));
+        paper.add("loaders", arr("folia", "paper", "purpur"));
+        JsonObject olderPaper = version("O", "P", "5.15-paper", "release", "2025-12-11T11:47:36Z", file("bluemap-5.15-paper.jar", true, sha512("o")));
+        olderPaper.add("loaders", arr("paper"));
+        versions("bluemap", spigot, paper, olderPaper);
+
+        UpdateCandidate c = source(List.of("paper", "spigot", "bukkit"), List.of(), List.of("release"))
+                .findLatest(request(Map.of("project_id", "bluemap"))).orElseThrow();
+        assertEquals("5.16-paper", c.version());
+        assertTrue(c.downloadUrl().toString().endsWith("bluemap-5.16-paper.jar"), c.downloadUrl().toString());
+
+        // A newer version that exists only for another loader still wins over an older Paper build.
+        JsonObject newerSpigotOnly = version("N", "P", "5.17-spigot", "release", "2026-03-01T00:00:00Z", file("bluemap-5.17-spigot.jar", true, sha512("n")));
+        newerSpigotOnly.add("loaders", arr("spigot"));
+        versions("bluemap", newerSpigotOnly, spigot, paper);
+        assertEquals("5.17-spigot", source(List.of("paper", "spigot", "bukkit"), List.of(), List.of("release"))
+                .findLatest(request(Map.of("project_id", "bluemap"))).orElseThrow().version());
+    }
+
+    @Test
     void noUsableVersionGivesEmpty() throws IOException {
         // Only beta versions (like Geyser on Modrinth): say so instead of a bare "no compatible version".
         versions("luckperms", version("B", "P", "2.0-beta", "beta", "2026-02-01T00:00:00Z", file("b.jar", true, sha512("b"))));

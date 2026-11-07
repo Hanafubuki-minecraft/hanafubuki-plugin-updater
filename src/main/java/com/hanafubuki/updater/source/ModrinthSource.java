@@ -21,6 +21,7 @@ import com.hanafubuki.updater.config.PluginEntry;
 import com.hanafubuki.updater.http.HttpService;
 import com.hanafubuki.updater.util.Checksum;
 import com.hanafubuki.updater.util.Json;
+import com.hanafubuki.updater.util.VersionUtils;
 
 /**
  * Modrinth (https://api.modrinth.com/v2).
@@ -144,7 +145,7 @@ public final class ModrinthSource implements UpdateSource {
             return Optional.empty();
         }
         usable.sort(Comparator.comparing((JsonObject v) -> published(v)).reversed());
-        JsonObject latest = usable.get(0);
+        JsonObject latest = preferLoader(usable, loaders);
         JsonObject file = pickJar(latest);
 
         String sha512 = Json.str(Json.obj(file, "hashes"), "sha512");
@@ -198,6 +199,27 @@ public final class ModrinthSource implements UpdateSource {
     private static boolean sameProject(KnownVersion known, JsonObject latest, String configuredProject) {
         String latestProject = Json.str(latest, "project_id");
         return known.projectId().equals(latestProject) || known.projectId().equals(configuredProject);
+    }
+
+    /**
+     * Picks the newest version, but when the same version is published as separate builds per loader
+     * (BlueMap: "5.16-paper" and "5.16-spigot", seconds apart), takes the build for the loader that
+     * comes first in the configured list, so a Paper server gets the Paper build.
+     *
+     * @param newestFirst usable versions, newest first
+     */
+    static JsonObject preferLoader(List<JsonObject> newestFirst, List<String> loaders) {
+        JsonObject newest = newestFirst.get(0);
+        String newestNumber = Json.str(newest, "version_number");
+        for (String loader : loaders) {
+            for (JsonObject v : newestFirst) {
+                if (Json.containsIgnoreCase(Json.arr(v, "loaders"), loader)
+                        && VersionUtils.compare(Json.str(v, "version_number"), newestNumber) == 0) {
+                    return v;
+                }
+            }
+        }
+        return newest;
     }
 
     /** The primary .jar file of a version, or the only .jar file. Null if there is none. */
