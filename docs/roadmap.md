@@ -52,6 +52,13 @@ Everything planned for v1.1 to v1.5 is implemented in 1.5.0.
 
 ## Changelog
 
+### 1.5.3
+
+**Fixed**
+
+- GitHub: `original-*.jar` files that `maven-shade-plugin` leaves next to the real jar are ignored, so Maven
+  releases with both jars no longer need an `asset_pattern`.
+
 ### 1.5.2
 
 **Fixed**

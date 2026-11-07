@@ -174,6 +174,17 @@ class GitHubSourceTest {
     }
 
     @Test
+    void mavenShadeOriginalJarIsIgnored() throws IOException {
+        // A Maven build with maven-shade-plugin uploads target/*.jar: the shaded jar and original-<name>.jar.
+        latest(release("v1.16.1", "", false, asset("untitled-1.0-SNAPSHOT.jar", null),
+                asset("original-untitled-1.0-SNAPSHOT.jar", null)));
+
+        UpdateCandidate c = find(Map.of());
+
+        assertTrue(c.downloadUrl().toString().endsWith("/untitled-1.0-SNAPSHOT.jar"), c.downloadUrl().toString());
+    }
+
+    @Test
     void repositoryWithoutReleasesIsExplained() {
         // GitHub answers 404 for /releases/latest when there is no release; the repository itself exists.
         server.json(API, "{\"full_name\":\"" + REPO + "\"}");

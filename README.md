@@ -182,7 +182,7 @@ If you want to anyway: Java 21.
 The plugin version lives in a single place — [`gradle.properties`](gradle.properties):
 
 ```properties
-version=1.5.2
+version=1.5.3
 ```
 
 Bump it and push to `master` → GitHub Actions builds the jar and publishes release `v<version>` with auto-generated notes.
